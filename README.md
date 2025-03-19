@@ -44,7 +44,7 @@ Browser extension allowing pass all the NetAcad quizzes
 1. Open your course at [Netacad.com](https://netacad.com/)
 2. Simply click on quiz question and the right option(s) should select automatically
 
-<video src="assets/videos/demo.mp4" width="100%" controls></video>
+![demo.gif](assets/videos/demo.gif)
 
 ## Supported browsers:
 
