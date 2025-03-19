@@ -2,13 +2,13 @@ import browser from 'webextension-polyfill';
 
 let isReady = false;
 let isInitiated = false;
-let components = [];
-let currentComponentsUrl = '';
+const components = [];
 let questions = [];
+const componentUrls = [];
 
 browser.runtime.onMessage.addListener(async (request) => {
-  if (request?.componentsUrl && typeof request.componentsUrl === 'string' && request.componentsUrl !== currentComponentsUrl) {
-    currentComponentsUrl = request.componentsUrl;
+  if (request?.componentsUrl && typeof request.componentsUrl === 'string' && !componentUrls.includes(request.componentsUrl)) {
+    componentUrls.push(request.componentsUrl);
     await setComponents(request.componentsUrl);
 
     if (isInitiated) {
@@ -24,12 +24,25 @@ const setComponents = async url => {
     return doc.body.textContent;
   };
 
-  components = (await (await fetch(url)).json())
-    .filter(component => component._items)
-    .map(component => {
-      component.body = getTextContentOfText(component.body);
-      return component;
-    });
+  try {
+    const res = await fetch(url);
+
+    if (!res.ok)
+      return;
+
+    let json = await res.json();
+    json = json
+      .filter(component => component._items)
+      .filter(component => !components.map(c => c._id).includes(component._id))
+      .map(component => {
+        component.body = getTextContentOfText(component.body);
+        return component;
+      });
+
+    components.push(...json);
+  } catch (e) {
+    console.error(e);
+  }
 };
 
 const setQuestions = document => {
@@ -185,6 +198,10 @@ const initClickListeners = () => {
     question.questionElement.addEventListener('click', () => {
       if (question.answerType === 'basic') {
         question.inputs.forEach((input, i) => {
+          if (input.checked) {
+            input.click();
+          }
+
           if (component._items[i]._shouldBeSelected) {
             input.click();
           }
@@ -251,5 +268,15 @@ const suspendMain = () => {
   const interval = setInterval(checking, 1000);
 };
 
-if (window)
+if (window) {
+  let previousUrl = '';
+
+  setInterval(() => {
+    if (window.location.href !== previousUrl) {
+      previousUrl = window.location.href;
+      suspendMain();
+    }
+  }, 1000);
+
   window.addEventListener('load', suspendMain);
+}
