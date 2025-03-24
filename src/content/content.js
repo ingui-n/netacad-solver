@@ -1,6 +1,5 @@
 import browser from 'webextension-polyfill';
 
-let isReady = false;
 let isInitiated = false;
 const components = [];
 let questions = [];
@@ -109,10 +108,11 @@ const findQuestionElement = currentDocument => {
 
 const findAnswerInputsBasic = (currentDocument, questionId, answersLength, inputs = []) => {
   for (let i = 0; i < answersLength; i++) {
-    const answerInput = currentDocument.querySelector(`#${CSS.escape(questionId)}-${i}-input`);
+    const input = currentDocument.querySelector(`#${CSS.escape(questionId)}-${i}-input`);
+    const label = currentDocument.querySelector(`#${CSS.escape(questionId)}-${i}-label`);
 
-    if (answerInput) {
-      inputs.push(answerInput);
+    if (input) {
+      inputs.push({input, label});
 
       if (inputs.length === answersLength) {
         return inputs;
@@ -125,10 +125,11 @@ const findAnswerInputsBasic = (currentDocument, questionId, answersLength, input
 
   for (const document of documents) {
     for (let i = 0; i < answersLength; i++) {
-      const answerInput = document.shadowRoot.querySelector(`#${CSS.escape(questionId)}-${i}-input`);
+      const input = document.shadowRoot.querySelector(`#${CSS.escape(questionId)}-${i}-input`);
+      const label = document.shadowRoot.querySelector(`#${CSS.escape(questionId)}-${i}-label`);
 
-      if (answerInput) {
-        inputs.push(answerInput);
+      if (input) {
+        inputs.push({input, label});
 
         if (inputs.length === answersLength) {
           return inputs;
@@ -179,7 +180,7 @@ const findAnswerInputsMatch = (currentDocument, questionId, answersLength, butto
 
 const setQuestionElements = () => {
   questions.map(question => {
-    question.questionElement = findQuestionElement(question.questionDiv);
+    question.questionElement = findQuestionElement(question.questionDiv);//todo split to multiple questions
     question.inputs = findAnswerInputsBasic(question.questionDiv, question.id, question.answersLength) || [];
     question.answerType = 'basic';
 
@@ -197,7 +198,7 @@ const initClickListeners = () => {
 
     question.questionElement.addEventListener('click', () => {
       if (question.answerType === 'basic') {
-        question.inputs.forEach((input, i) => {
+        question.inputs.forEach(({input}, i) => {
           if (input.checked) {
             input.click();
           }
@@ -216,34 +217,60 @@ const initClickListeners = () => {
   });
 };
 
-const setIsReady = document => {
-  if (!document) return;
+const initHoverListeners = () => {
+  questions.forEach((question) => {
+    const component = components.find(c => c._id === question.id);
+
+    if (question.answerType === 'basic') {
+      question.inputs.forEach(({input, label}, i) => {
+        label.addEventListener('mouseover', e => {
+          if (e.ctrlKey) {
+            if (input.checked) {
+              input.click();
+            }
+
+            if (component._items[i]._shouldBeSelected) {
+              input.click();
+            }
+          }
+        });
+      });
+    } else if (question.answerType === 'match') {
+      question.inputs.forEach(input => {
+        input[0].addEventListener('mouseover', e => {
+          if (e.ctrlKey) {
+            input[0].click();
+            input[1].click();
+          }
+        });
+      });
+    }
+  });
+};
+
+const setIsReady = (document) => {
+  if (!document) return false;
 
   const iframes = document.querySelectorAll('iframe');
 
-  let isSetNew = false;
-
   for (const iframe of iframes) {
-    setIsReady(iframe.contentDocument);
-    isSetNew = true;
+    if (setIsReady(iframe.contentDocument))
+      return true;
   }
 
-  if (!isSetNew) {
-    const documents = [...document.querySelectorAll('*')]
-      .filter(el => el.tagName.toLowerCase().endsWith('-view') || el.tagName.toLowerCase() === 'app-root');
+  const documents = [...document.querySelectorAll('*')]
+    .filter(el => el.tagName.toLowerCase().endsWith('-view') || el.tagName.toLowerCase() === 'app-root');
 
-    for (const document of documents) {
-      for (const component of components) {
-        const questionDiv = document?.shadowRoot?.querySelector(`.${CSS.escape(component._id)}`);
+  for (const document of documents) {
+    for (const component of components) {
+      const questionDiv = document?.shadowRoot?.querySelector(`.${CSS.escape(component._id)}`);
 
-        if (questionDiv) {
-          isReady = true;
-          return;
-        }
-      }
-
-      setIsReady(document.shadowRoot);
+      if (questionDiv)
+        return true;
     }
+
+    if (setIsReady(document.shadowRoot))
+      return true;
   }
 };
 
@@ -252,12 +279,15 @@ const main = () => {
   setQuestions(document);
   setQuestionElements();
   initClickListeners();
+  initHoverListeners();
 };
 
 const suspendMain = () => {
+  let isReady = false;
+
   const checking = () => {
     if (!isReady) {
-      setIsReady(document);
+      isReady = !!setIsReady(document);
     } else {
       clearInterval(interval);
       main();
@@ -277,6 +307,4 @@ if (window) {
       suspendMain();
     }
   }, 1000);
-
-  window.addEventListener('load', suspendMain);
 }
