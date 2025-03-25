@@ -1,5 +1,7 @@
 import browser from 'webextension-polyfill';
+import {deepHtmlSearch, deepHtmlFindByTextContent} from "./domHelper";
 
+let isSuspendRunning = false;
 let isInitiated = false;
 const components = [];
 let questions = [];
@@ -44,72 +46,44 @@ const setComponents = async url => {
   }
 };
 
-const setQuestions = document => {
-  if (!document) return;
-
-  const iframes = document.querySelectorAll('iframe');
-
-  let isSetNew = false;
-
-  for (const iframe of iframes) {
-    setQuestions(iframe.contentDocument);
-    isSetNew = true;
-  }
-
-  if (isSetNew) {
-    return;
-  }
-
-  const documents = [...document.querySelectorAll('*')]
-    .filter(el => el.tagName.toLowerCase().endsWith('-view') || el.tagName.toLowerCase() === 'app-root');
-
-  for (const document of documents) {
-    for (const component of components) {
-      const questionDiv = document.shadowRoot.querySelector(`.${CSS.escape(component._id)}`);
-
-      if (questionDiv) {
-        questions.push({questionDiv, id: component._id, answersLength: component._items.length});
-        break;
-      }
-    }
-
-    setQuestions(document.shadowRoot);
-  }
-};
-
-const findQuestionElement = currentDocument => {
+const setQuestionSections = () => {
   for (const component of components) {
-    const questionElement = [...currentDocument.querySelectorAll('*')]
-      .filter(el => el.textContent === component.body);
+    const questionDiv = deepHtmlSearch(document, `.${CSS.escape(component._id)}`);
 
-    if (questionElement.length > 0) {
-      return questionElement[0];
-    }
-  }
+    if (questionDiv) {
+      let questionType = 'basic';
 
-  const documents = [...currentDocument.querySelectorAll('*')]
-    .filter(el => el.tagName.toLowerCase().endsWith('-view'));
-
-  for (const document of documents) {
-    for (const component of components) {
-      const questionElement = [...document.shadowRoot.querySelectorAll('*')]
-        .filter(el => el.textContent === component.body);
-
-      if (questionElement.length > 0) {
-        return questionElement[0];
+      if (component._items[0].text && component._items[0]._options) {
+        questionType = 'dropdownSelect';
+      } else if (component._items[0].question && component._items[0].answer) {
+        questionType = 'match';
       }
-    }
 
-    if (document.shadowRoot) {
-      findQuestionElement(document.shadowRoot);
+      questions.push({
+        questionDiv,
+        id: component._id,
+        answersLength: component._items.length,
+        questionType,
+        items: component._items
+      });
     }
   }
 };
 
-const findAnswerInputsBasic = (currentDocument, questionId, answersLength, inputs = []) => {
+const findQuestionElement = document => {
+  for (const component of components) {
+    const questionElement = deepHtmlFindByTextContent(document, component.body);
+
+    if (questionElement) {
+      return questionElement;
+    }
+  }
+};
+
+const findAnswerInputsBasic = (document, questionId, answersLength, inputs = []) => {
   for (let i = 0; i < answersLength; i++) {
-    const input = currentDocument.querySelector(`#${CSS.escape(questionId)}-${i}-input`);
-    const label = currentDocument.querySelector(`#${CSS.escape(questionId)}-${i}-label`);
+    const input = deepHtmlSearch(document, `#${CSS.escape(questionId)}-${i}-input`);
+    const label = deepHtmlSearch(document, `#${CSS.escape(questionId)}-${i}-label`);
 
     if (input) {
       inputs.push({input, label});
@@ -119,35 +93,13 @@ const findAnswerInputsBasic = (currentDocument, questionId, answersLength, input
       }
     }
   }
-
-  const documents = [...currentDocument.querySelectorAll('*')]
-    .filter(el => el.tagName.toLowerCase().endsWith('-view'));
-
-  for (const document of documents) {
-    for (let i = 0; i < answersLength; i++) {
-      const input = document.shadowRoot.querySelector(`#${CSS.escape(questionId)}-${i}-input`);
-      const label = document.shadowRoot.querySelector(`#${CSS.escape(questionId)}-${i}-label`);
-
-      if (input) {
-        inputs.push({input, label});
-
-        if (inputs.length === answersLength) {
-          return inputs;
-        }
-      }
-    }
-
-    if (document.shadowRoot) {
-      findAnswerInputsBasic(document.shadowRoot, questionId, answersLength, inputs);
-    }
-  }
 };
 
-const findAnswerInputsMatch = (currentDocument, questionId, answersLength, buttons = []) => {
+const findAnswerInputsMatch = (document, answersLength, buttons = []) => {
   for (let i = 0; i < answersLength; i++) {
-    const answerInputs = currentDocument.querySelectorAll(`[data-id="${i}"]`);
+    const answerInputs = deepHtmlSearch(document, `[data-id="${i}"]`, false, 2);
 
-    if (answerInputs && answerInputs.length === 2) {
+    if (answerInputs) {
       buttons.push(answerInputs);
 
       if (buttons.length === answersLength) {
@@ -155,49 +107,55 @@ const findAnswerInputsMatch = (currentDocument, questionId, answersLength, butto
       }
     }
   }
-
-  const documents = [...currentDocument.querySelectorAll('*')]
-    .filter(el => el.tagName.toLowerCase().endsWith('-view'));
-
-  for (const document of documents) {
-    for (let i = 0; i < answersLength; i++) {
-      const answerInputs = document.shadowRoot.querySelector(`[data-id="${i}"]`);
-
-      if (answerInputs && answerInputs.length === 2) {
-        buttons.push(answerInputs);
-
-        if (buttons.length === answersLength) {
-          return buttons;
-        }
-      }
-    }
-
-    if (document.shadowRoot) {
-      findAnswerInputsMatch(document.shadowRoot, questionId, answersLength, buttons);
-    }
-  }
 };
 
 const setQuestionElements = () => {
   questions.map(question => {
-    question.questionElement = findQuestionElement(question.questionDiv);//todo split to multiple questions
-    question.inputs = findAnswerInputsBasic(question.questionDiv, question.id, question.answersLength) || [];
-    question.answerType = 'basic';
-
-    if (question.inputs.length === 0) {
-      question.inputs = findAnswerInputsMatch(question.questionDiv, question.id, question.answersLength) || [];
-      question.answerType = 'match';
+    if (question.questionType === 'basic') {
+      question.questionElement = findQuestionElement(question.questionDiv);
+      question.inputs = findAnswerInputsBasic(question.questionDiv, question.id, question.answersLength) || [];
+    } else if (question.questionType === 'match') {
+      question.questionElement = findQuestionElement(question.questionDiv);
+      question.inputs = findAnswerInputsMatch(question.questionDiv, question.answersLength) || [];
+    } else if (question.questionType === 'dropdownSelect') {
+      setDropdownSelectQuestions(question);
+      question.skip = true;
     }
+
     return question;
+  });
+};
+
+const setDropdownSelectQuestions = question => {
+  question.items.forEach((item, i) => {
+    const questionDiv = deepHtmlSearch(question.questionDiv, `[index="${i}"]`, true);
+    const questionElement = deepHtmlFindByTextContent(questionDiv, item.text);
+
+    for (const [index, option] of item._options.entries()) {
+      if (option._isCorrect) {
+        const optionElement = deepHtmlSearch(questionDiv, `#dropdown__item-index-${index}`, true);
+
+        questions.push({
+          questionDiv,
+          questionElement,
+          inputs: [optionElement],
+          questionType: question.questionType
+        });
+        return;
+      }
+    }
   });
 };
 
 const initClickListeners = () => {
   questions.forEach((question) => {
-    const component = components.find(c => c._id === question.id);
+    if (question.skip)
+      return;
 
-    question.questionElement.addEventListener('click', () => {
-      if (question.answerType === 'basic') {
+    question.questionElement?.addEventListener('click', () => {
+      if (question.questionType === 'basic') {
+        const component = components.find(c => c._id === question.id);
+
         question.inputs.forEach(({input}, i) => {
           if (input.checked) {
             input.click();
@@ -207,11 +165,13 @@ const initClickListeners = () => {
             input.click();
           }
         });
-      } else if (question.answerType === 'match') {
+      } else if (question.questionType === 'match') {
         question.inputs.forEach(input => {
           input[0].click();
           input[1].click();
         });
+      } else if (question.questionType === 'dropdownSelect') {
+        question.inputs[0]?.click();
       }
     });
   });
@@ -219,9 +179,12 @@ const initClickListeners = () => {
 
 const initHoverListeners = () => {
   questions.forEach((question) => {
+    if (question.skip)
+      return;
+
     const component = components.find(c => c._id === question.id);
 
-    if (question.answerType === 'basic') {
+    if (question.questionType === 'basic') {
       question.inputs.forEach(({input, label}, i) => {
         label.addEventListener('mouseover', e => {
           if (e.ctrlKey) {
@@ -235,7 +198,7 @@ const initHoverListeners = () => {
           }
         });
       });
-    } else if (question.answerType === 'match') {
+    } else if (question.questionType === 'match') {
       question.inputs.forEach(input => {
         input[0].addEventListener('mouseover', e => {
           if (e.ctrlKey) {
@@ -244,39 +207,30 @@ const initHoverListeners = () => {
           }
         });
       });
+    } else if (question.questionType === 'dropdownSelect') {
+      question.inputs[0]?.addEventListener('mouseover', e => {
+        if (e.ctrlKey) {
+          question.inputs[0].click();
+        }
+      });
     }
   });
 };
 
-const setIsReady = (document) => {
-  if (!document) return false;
+const setIsReady = () => {
+  for (const component of components) {
+    const questionDiv = deepHtmlSearch(document, `.${CSS.escape(component._id)}`);
 
-  const iframes = document.querySelectorAll('iframe');
-
-  for (const iframe of iframes) {
-    if (setIsReady(iframe.contentDocument))
+    if (questionDiv)
       return true;
   }
 
-  const documents = [...document.querySelectorAll('*')]
-    .filter(el => el.tagName.toLowerCase().endsWith('-view') || el.tagName.toLowerCase() === 'app-root');
-
-  for (const document of documents) {
-    for (const component of components) {
-      const questionDiv = document?.shadowRoot?.querySelector(`.${CSS.escape(component._id)}`);
-
-      if (questionDiv)
-        return true;
-    }
-
-    if (setIsReady(document.shadowRoot))
-      return true;
-  }
+  return false;
 };
 
 const main = () => {
   questions = [];
-  setQuestions(document);
+  setQuestionSections();
   setQuestionElements();
   initClickListeners();
   initHoverListeners();
@@ -284,14 +238,16 @@ const main = () => {
 
 const suspendMain = () => {
   let isReady = false;
+  isSuspendRunning = true;
 
   const checking = () => {
     if (!isReady) {
-      isReady = !!setIsReady(document);
+      isReady = !!setIsReady();
     } else {
       clearInterval(interval);
       main();
       isInitiated = true;
+      isSuspendRunning = false;
     }
   };
 
@@ -304,7 +260,9 @@ if (window) {
   setInterval(() => {
     if (window.location.href !== previousUrl) {
       previousUrl = window.location.href;
-      suspendMain();
+
+      if (!isSuspendRunning)
+        suspendMain();
     }
   }, 1000);
 }
