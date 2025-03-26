@@ -57,6 +57,8 @@ const setQuestionSections = () => {
         questionType = 'dropdownSelect';
       } else if (component._items[0].question && component._items[0].answer) {
         questionType = 'match';
+      } else if (component._items[0]._graphic?.alt && component._items[0]._graphic?.src) {
+        questionType = 'yesNo';
       }
 
       questions.push({
@@ -120,6 +122,10 @@ const setQuestionElements = () => {
     } else if (question.questionType === 'dropdownSelect') {
       setDropdownSelectQuestions(question);
       question.skip = true;
+    } else if (question.questionType === 'yesNo') {
+      // yes - no questions are dynamic - they use the same elements but changes attributes
+      initYeNoQuestions(question);
+      question.skip = true;
     }
 
     return question;
@@ -142,6 +148,66 @@ const setDropdownSelectQuestions = question => {
           questionType: question.questionType
         });
         return;
+      }
+    }
+  });
+};
+
+const initYeNoQuestions = question => {
+  const questionElement = deepHtmlSearch(question.questionDiv, `.img_question`);
+
+  if (!questionElement)
+    return;
+
+  questionElement.parentElement.addEventListener('click', e => {
+    const questionElement = deepHtmlSearch(e.target, `.img_question`);
+
+    for (const item of question.items) {
+      if (questionElement.alt === item._graphic.alt) {
+        if (item._shouldBeSelected) {
+          const yesButton = deepHtmlSearch(question.questionDiv, `.user_selects_yes`);
+          yesButton.click();
+        } else {
+          const noButton = deepHtmlSearch(question.questionDiv, `.user_selects_no`);
+          noButton.click();
+        }
+      }
+    }
+  });
+
+  const yesButton = deepHtmlSearch(question.questionDiv, `.user_selects_yes`);
+  const noButton = deepHtmlSearch(question.questionDiv, `.user_selects_no`);
+
+  yesButton.addEventListener('mouseover', e => {
+    if (e.ctrlKey) {
+      const questionElement = deepHtmlSearch(question.questionDiv, `.img_question`);
+
+      if (questionElement) {
+        for (const item of question.items) {
+          if (item._graphic.alt === questionElement.alt) {
+            if (item._shouldBeSelected) {
+              yesButton.click();
+            }
+            break;
+          }
+        }
+      }
+    }
+  });
+
+  noButton.addEventListener('mouseover', e => {
+    if (e.ctrlKey) {
+      const questionElement = deepHtmlSearch(question.questionDiv, `.img_question`);
+
+      if (questionElement) {
+        for (const item of question.items) {
+          if (item._graphic.alt === questionElement.alt) {
+            if (!item._shouldBeSelected) {
+              noButton.click();
+            }
+            break;
+          }
+        }
       }
     }
   });
