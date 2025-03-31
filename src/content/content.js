@@ -63,6 +63,8 @@ const setQuestionSections = () => {
         questionType = 'openTextInput';
       } else if (component._items[0].preText && component._items[0].postText && component._items[0]._options?.[0]?.text) {
         questionType = 'fillBlanks';
+      } else if (component._items[0]._options?.[0].text && typeof component._items[0]._options?.[0]._isCorrect === 'boolean') {
+        questionType = 'tableDropdown';
       }
 
       questions.push({
@@ -137,6 +139,10 @@ const setQuestionElements = () => {
     } else if (question.questionType === 'fillBlanks') {
       setFillBlanksQuestions(question);
       question.skip = true;
+    } else if (question.questionType === 'tableDropdown') {
+      // when there is no description in the table down only mouseover works
+      setTableDropdownQuestions(question);
+      question.skip = true;
     }
 
     return question;
@@ -146,7 +152,7 @@ const setQuestionElements = () => {
 const setDropdownSelectQuestions = question => {
   question.items.forEach((item, i) => {
     const questionDiv = deepHtmlSearch(question.questionDiv, `[index="${i}"]`, true);
-    const questionElement = deepHtmlFindByTextContent(questionDiv, item.text);
+    const questionElement = deepHtmlFindByTextContent(questionDiv, item.text.trim());
 
     for (const [index, option] of item._options.entries()) {
       if (option._isCorrect) {
@@ -233,7 +239,7 @@ const setOpenTextInputQuestions = question => {
       setTimeout(() => {
         button.click();
         const currentQuestion = questionElement?.textContent?.trim();
-        const position = question.items.find(item => item._options.text === currentQuestion)?.position?.[0];
+        const position = question.items.find(item => item._options.text.trim() === currentQuestion)?.position?.[0];
 
         if (position) {
           setTimeout(() => {
@@ -251,7 +257,7 @@ const setOpenTextInputQuestions = question => {
     button?.addEventListener('click', () => {
       setTimeout(() => {
         const currentQuestion = questionElement?.textContent?.trim();
-        const position = question.items.find(item => item._options.text === currentQuestion)?.position?.[0];
+        const position = question.items.find(item => item._options.text.trim() === currentQuestion)?.position?.[0];
 
         if (position) {
           setTimeout(() => {
@@ -305,6 +311,30 @@ const setFillBlanksQuestions = question => {
       }
     });
   }
+};
+
+const setTableDropdownQuestions = question => {
+  const sectionDivs = Array.from(deepHtmlSearch(question.questionDiv, 'tbody tr', true, question.answersLength));
+
+  sectionDivs.forEach((section, i) => {
+    const optionElements = Array.from(deepHtmlSearch(section, '[role="option"]', true, question.items[i]._options.length));
+    const correctOption = question.items[i]._options.find(option => option._isCorrect);
+
+    for (const optionElement of optionElements) {
+      if (optionElement.textContent.trim() === correctOption.text.trim()) {
+        section.addEventListener('click', () => {
+          optionElement.click();
+        });
+
+        optionElement.addEventListener('mouseover', e => {
+          if (e.ctrlKey) {
+            optionElement.click();
+          }
+        });
+        break;
+      }
+    }
+  });
 };
 
 const initClickListeners = () => {
