@@ -28,7 +28,7 @@ browser.webRequest.onSendHeaders.addListener(async ({url}) => {
     const sendInterval = setInterval(handleSendUrl, 1000);
   },
   {
-    urls: ['https://*.netacad.com/content/noes/*/components.json']
+    urls: ['https://*.netacad.com/content/*/components.json']
   }
 );
 
@@ -45,6 +45,6 @@ browser.webRequest.onBeforeSendHeaders.addListener((details) => {
       })
     };
   },
-  {urls: ['https://*.netacad.com/content/noes/*/components.json']},
+  {urls: ['https://*.netacad.com/content/*/components.json']},
   ["requestHeaders"]
 );
