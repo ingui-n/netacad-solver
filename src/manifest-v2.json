@@ -2,7 +2,7 @@
   "manifest_version": 2,
   "name": "MeowCad Solver",
   "description": "Extension allowing you to pass even the hardest MeowCad quizzes",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "icons": {
     "16": "icon-16.png",
     "32": "icon-32.png",
