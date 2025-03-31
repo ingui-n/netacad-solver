@@ -283,7 +283,7 @@ const setFillBlanksQuestions = question => {
       const textContent = questionDiv.textContent.trim();
 
       for (const item of question.items) {
-        if (textContent.startsWith(item.preText) && textContent.endsWith(item.postText)) {
+        if (textContent.startsWith(removeTagsFromString(item.preText)) && textContent.endsWith(removeTagsFromString(item.postText))) {
           for (const option of item._options) {
             if (option._isCorrect) {
               const dropdownItems = [...deepHtmlSearch(questionDiv, '.dropdown__item', true, item._options.length)];
@@ -406,6 +406,8 @@ const initHoverListeners = () => {
     }
   });
 };
+
+const removeTagsFromString = string => string.replace(/<[^>]*>?/gm, '').trim();
 
 const setIsReady = () => {
   for (const component of components) {
