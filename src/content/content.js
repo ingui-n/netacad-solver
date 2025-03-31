@@ -236,7 +236,7 @@ const setOpenTextInputQuestions = question => {
             if (input) {
               input?.click();
             } else {
-              questionElement.click();
+              question.questionDiv.click();
             }
           }, 100);
         }
