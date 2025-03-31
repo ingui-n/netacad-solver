@@ -59,6 +59,8 @@ const setQuestionSections = () => {
         questionType = 'match';
       } else if (component._items[0]._graphic?.alt && component._items[0]._graphic?.src) {
         questionType = 'yesNo';
+      } else if (component._items[0].id && component._items[0]._options?.text) {
+        questionType = 'openTextInput';
       }
 
       questions.push({
@@ -125,6 +127,10 @@ const setQuestionElements = () => {
     } else if (question.questionType === 'yesNo') {
       // yes - no questions are dynamic - they use the same elements but changes attributes
       initYeNoQuestions(question);
+      question.skip = true;
+    } else if (question.questionType === 'openTextInput') {
+      // buttons are static but questions are moving around
+      setOpenTextInputQuestions(question);
       question.skip = true;
     }
 
@@ -213,6 +219,51 @@ const initYeNoQuestions = question => {
   });
 };
 
+const setOpenTextInputQuestions = question => {
+  question.items.forEach((item, i) => {
+    const questionElement = deepHtmlSearch(question.questionDiv, '#' + CSS.escape(`${question.id}-option-${i}`));
+    const button = deepHtmlSearch(question.questionDiv, `.current-item-${i}`, true);
+
+    questionElement.addEventListener('click', () => {
+      setTimeout(() => {
+        button.click();
+        const currentQuestion = questionElement?.textContent?.trim();
+        const position = question.items.find(item => item._options.text === currentQuestion)?.position?.[0];
+
+        if (position) {
+          setTimeout(() => {
+            const input = deepHtmlSearch(question.questionDiv, `[data-target="${position}"]`);
+            if (input) {
+              input?.click();
+            } else {
+              questionElement.click();
+            }
+          }, 100);
+        }
+      }, 100);
+    });
+
+    button.addEventListener('click', () => {
+      setTimeout(() => {
+        const currentQuestion = questionElement?.textContent?.trim();
+        const position = question.items.find(item => item._options.text === currentQuestion)?.position?.[0];
+
+        if (position) {
+          setTimeout(() => {
+            const input = deepHtmlSearch(question.questionDiv, `[data-target="${position}"]`);
+
+            input?.addEventListener('mouseover', e => {
+              if (e.ctrlKey) {
+                input.click();
+              }
+            });
+          }, 100);
+        }
+      }, 100);
+    });
+  });
+};
+
 const initClickListeners = () => {
   questions.forEach((question) => {
     if (question.skip)
@@ -222,13 +273,13 @@ const initClickListeners = () => {
       if (question.questionType === 'basic') {
         const component = components.find(c => c._id === question.id);
 
-        question.inputs.forEach(({input}, i) => {
+        question.inputs.forEach(({input, label}, i) => {
           if (input.checked) {
-            input.click();
+            label.click();
           }
 
           if (component._items[i]._shouldBeSelected) {
-            input.click();
+            label.click();
           }
         });
       } else if (question.questionType === 'match') {
@@ -255,11 +306,11 @@ const initHoverListeners = () => {
         label.addEventListener('mouseover', e => {
           if (e.ctrlKey) {
             if (input.checked) {
-              input.click();
+              label.click();
             }
 
             if (component._items[i]._shouldBeSelected) {
-              input.click();
+              label.click();
             }
           }
         });
