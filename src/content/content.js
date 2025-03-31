@@ -61,6 +61,8 @@ const setQuestionSections = () => {
         questionType = 'yesNo';
       } else if (component._items[0].id && component._items[0]._options?.text) {
         questionType = 'openTextInput';
+      } else if (component._items[0].preText && component._items[0].postText && component._items[0]._options?.[0]?.text) {
+        questionType = 'fillBlanks';
       }
 
       questions.push({
@@ -132,6 +134,9 @@ const setQuestionElements = () => {
       // buttons are static but questions are moving around
       setOpenTextInputQuestions(question);
       question.skip = true;
+    } else if (question.questionType === 'fillBlanks') {
+      setFillBlanksQuestions(question);
+      question.skip = true;
     }
 
     return question;
@@ -165,7 +170,7 @@ const initYeNoQuestions = question => {
   if (!questionElement)
     return;
 
-  questionElement.parentElement.addEventListener('click', e => {
+  questionElement.parentElement?.addEventListener('click', e => {
     const questionElement = deepHtmlSearch(e.target, `.img_question`);
 
     for (const item of question.items) {
@@ -184,7 +189,7 @@ const initYeNoQuestions = question => {
   const yesButton = deepHtmlSearch(question.questionDiv, `.user_selects_yes`);
   const noButton = deepHtmlSearch(question.questionDiv, `.user_selects_no`);
 
-  yesButton.addEventListener('mouseover', e => {
+  yesButton?.addEventListener('mouseover', e => {
     if (e.ctrlKey) {
       const questionElement = deepHtmlSearch(question.questionDiv, `.img_question`);
 
@@ -201,7 +206,7 @@ const initYeNoQuestions = question => {
     }
   });
 
-  noButton.addEventListener('mouseover', e => {
+  noButton?.addEventListener('mouseover', e => {
     if (e.ctrlKey) {
       const questionElement = deepHtmlSearch(question.questionDiv, `.img_question`);
 
@@ -224,7 +229,7 @@ const setOpenTextInputQuestions = question => {
     const questionElement = deepHtmlSearch(question.questionDiv, '#' + CSS.escape(`${question.id}-option-${i}`));
     const button = deepHtmlSearch(question.questionDiv, `.current-item-${i}`, true);
 
-    questionElement.addEventListener('click', () => {
+    questionElement?.addEventListener('click', () => {
       setTimeout(() => {
         button.click();
         const currentQuestion = questionElement?.textContent?.trim();
@@ -243,7 +248,7 @@ const setOpenTextInputQuestions = question => {
       }, 100);
     });
 
-    button.addEventListener('click', () => {
+    button?.addEventListener('click', () => {
       setTimeout(() => {
         const currentQuestion = questionElement?.textContent?.trim();
         const position = question.items.find(item => item._options.text === currentQuestion)?.position?.[0];
@@ -262,6 +267,44 @@ const setOpenTextInputQuestions = question => {
       }, 100);
     });
   });
+};
+
+const setFillBlanksQuestions = question => {
+  const questionDivs = [...deepHtmlSearch(question.questionDiv, '.fillblanks__item', true, question.answersLength)];
+
+  if (questionDivs.length > 0) {
+    questionDivs.forEach(questionDiv => {
+      const textContent = questionDiv.textContent.trim();
+
+      for (const item of question.items) {
+        if (textContent.startsWith(item.preText) && textContent.endsWith(item.postText)) {
+          for (const option of item._options) {
+            if (option._isCorrect) {
+              const dropdownItems = [...deepHtmlSearch(questionDiv, '.dropdown__item', true, item._options.length)];
+
+              for (const dropdownItem of dropdownItems) {
+                if (dropdownItem.textContent.trim() === option.text.trim()) {
+                  questionDiv.addEventListener('click', (e) => {
+                    if (!e.target.textContent?.trim())
+                      return;
+                    dropdownItem.click();
+                  });
+
+                  dropdownItem.addEventListener('mouseover', e => {
+                    if (e.ctrlKey)
+                      dropdownItem.click();
+                  });
+                  break;
+                }
+              }
+              break;
+            }
+          }
+          break;
+        }
+      }
+    });
+  }
 };
 
 const initClickListeners = () => {
@@ -303,7 +346,7 @@ const initHoverListeners = () => {
 
     if (question.questionType === 'basic') {
       question.inputs.forEach(({input, label}, i) => {
-        label.addEventListener('mouseover', e => {
+        label?.addEventListener('mouseover', e => {
           if (e.ctrlKey) {
             if (input.checked) {
               label.click();
@@ -317,7 +360,7 @@ const initHoverListeners = () => {
       });
     } else if (question.questionType === 'match') {
       question.inputs.forEach(input => {
-        input[0].addEventListener('mouseover', e => {
+        input[0]?.addEventListener('mouseover', e => {
           if (e.ctrlKey) {
             input[0].click();
             input[1].click();
