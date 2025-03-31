@@ -118,6 +118,7 @@ const findAnswerInputsMatch = (document, answersLength, buttons = []) => {
 };
 
 const setQuestionElements = () => {
+  console.log(questions)
   questions.map(question => {
     if (question.questionType === 'basic') {
       question.questionElement = findQuestionElement(question.questionDiv);
