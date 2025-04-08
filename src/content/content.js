@@ -11,7 +11,6 @@ browser.runtime.onMessage.addListener(async (request) => {
   if (request?.componentsUrl && typeof request.componentsUrl === 'string' && !componentUrls.includes(request.componentsUrl)) {
     componentUrls.push(request.componentsUrl);
     await setComponents(request.componentsUrl);
-
     if (isInitiated) {
       suspendMain();
     }
@@ -46,11 +45,14 @@ const setComponents = async url => {
   }
 };
 
-const setQuestionSections = () => {
+const setQuestionSections = async () => {
+  let isAtLeaseOneSet = false;
+
   for (const component of components) {
     const questionDiv = deepHtmlSearch(document, `.${CSS.escape(component._id)}`);
 
     if (questionDiv) {
+      isAtLeaseOneSet = true;
       let questionType = 'basic';
 
       if (component._items[0].text && component._items[0]._options) {
@@ -75,6 +77,11 @@ const setQuestionSections = () => {
         items: component._items
       });
     }
+  }
+
+  if (!isAtLeaseOneSet) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    return await setQuestionSections();
   }
 };
 
@@ -118,7 +125,6 @@ const findAnswerInputsMatch = (document, answersLength, buttons = []) => {
 };
 
 const setQuestionElements = () => {
-  console.log(questions)
   questions.map(question => {
     if (question.questionType === 'basic') {
       question.questionElement = findQuestionElement(question.questionDiv);
@@ -353,7 +359,7 @@ const initClickListeners = () => {
           }
 
           if (component._items[i]._shouldBeSelected) {
-            label.click();
+            setTimeout(() => label.click(), 10);
           }
         });
       } else if (question.questionType === 'match') {
@@ -384,7 +390,7 @@ const initHoverListeners = () => {
             }
 
             if (component._items[i]._shouldBeSelected) {
-              label.click();
+              setTimeout(() => label.click(), 10);
             }
           }
         });
@@ -421,9 +427,9 @@ const setIsReady = () => {
   return false;
 };
 
-const main = () => {
+const main = async () => {
   questions = [];
-  setQuestionSections();
+  await setQuestionSections();
   setQuestionElements();
   initClickListeners();
   initHoverListeners();
@@ -433,12 +439,12 @@ const suspendMain = () => {
   let isReady = false;
   isSuspendRunning = true;
 
-  const checking = () => {
+  const checking = async () => {
     if (!isReady) {
       isReady = !!setIsReady();
     } else {
       clearInterval(interval);
-      main();
+      await main();
       isInitiated = true;
       isSuspendRunning = false;
     }
