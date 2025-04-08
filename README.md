@@ -42,10 +42,12 @@ Browser extension allowing pass all the NetAcad quizzes
 ## Usage:
 
 1. Open your course at [Netacad.com](https://netacad.com/)
-2. - Click on quiz question and the right option(s) should select automatically
-   - Hover over the answers while holding the `Ctrl` button and the right option(s) should select automatically
+2. Use one of following options:
+- Click on quiz question and the right option(s) should select automatically
+- Hover over the answers while holding the `Ctrl` button and the right option(s) should select automatically
 
 ![demo.gif](assets/videos/demo.gif)
+![demo-hover.gif](assets/videos/demo-hover.gif)
 
 ## Supported browsers:
 
