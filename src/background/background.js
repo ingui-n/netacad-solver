@@ -21,11 +21,12 @@ browser.webRequest.onSendHeaders.addListener(async ({url}) => {
       }
     };
 
-    let tabs = (await browser.tabs.query({}))
-      .filter(t => t.url?.includes('netacad.com') && t.id)
-      .filter(t => !t.url?.endsWith('components.json'));
-
+    let tabs = (await browser.tabs.query({})).filter(t => t.id && t.title);
     const sendInterval = setInterval(handleSendUrl, 1000);
+
+    setTimeout(() => {
+      clearInterval(sendInterval);
+    }, 30000);
   },
   {
     urls: ['https://*.netacad.com/content/*/components.json']
