@@ -3,7 +3,7 @@
 
 # NetAcad Solver
 
-Browser extension allowing pass all the NetAcad quizzes
+Browser extension allowing you to pass all the NetAcad quizzes
 
 <img alt="My generous offer" width="300" src="assets/screenshots/my-offer.jpg"/>
 
@@ -15,7 +15,7 @@ Browser extension allowing pass all the NetAcad quizzes
    from [Chrome Web Store](https://chromewebstore.google.com/detail/meowcad-solver/ngkonaonfgfbnobbacojipgndihanmca)
    or [Firefox Addons](https://addons.mozilla.org/en-US/firefox/addon/meowcad-solver/)
 
-### Manual installation:
+### Manual installation
 
 <details>
   <summary>For Chromium users: (click)</summary>
@@ -39,17 +39,17 @@ Browser extension allowing pass all the NetAcad quizzes
 
 </details>
 
-## Usage:
+## Usage
 
 1. Open your course at [Netacad.com](https://netacad.com/)
 2. Use one of following options:
-- Click on quiz question and the right option(s) should select automatically
+- Click on quiz question and the right option(s) should be selected automatically
 - Hover over the answers while holding the `Ctrl` button and the right option(s) should select automatically
 
 ![demo.gif](assets/videos/demo.gif)
 ![demo-hover.gif](assets/videos/demo-hover.gif)
 
-## Supported browsers:
+## Supported browsers
 
 * Firefox
 * Chrome
