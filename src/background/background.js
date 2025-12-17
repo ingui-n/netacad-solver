@@ -29,7 +29,7 @@ browser.webRequest.onSendHeaders.addListener(async ({url}) => {
     }, 30000);
   },
   {
-    urls: ['https://*.netacad.com/content/*/components.json']
+    urls: ['https://*.netacad.com/*/components.json']
   }
 );
 
@@ -46,6 +46,6 @@ browser.webRequest.onBeforeSendHeaders.addListener((details) => {
       })
     };
   },
-  {urls: ['https://*.netacad.com/content/*/components.json']},
+  {urls: ['https://*.netacad.com/*/components.json']},
   ["requestHeaders"]
 );
