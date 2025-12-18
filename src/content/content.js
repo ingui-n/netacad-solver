@@ -2,11 +2,21 @@ import browser from 'webextension-polyfill';
 import {deepHtmlSearch, deepHtmlFindByTextContent} from "./domHelper";
 
 let isSuspendRunning = false;
-let isInitiated = false;
 const components = [];
 let questions = [];
 const componentUrls = [];
-let iteration = 0;
+
+const processedQuestionElements = new WeakSet();
+const processedLabels = new WeakSet();
+const processedMatchPairs = new WeakSet();
+const processedDropdownOptions = new WeakSet();
+const processedYesNoContainers = new WeakSet();
+const processedOpenTextQuestions = new WeakSet();
+const processedFillBlankDivs = new WeakSet();
+const processedTableRows = new WeakSet();
+const processedOpenTextButtons = new WeakSet();
+const processedTableOptions = new WeakSet();
+const processedFillBlankOptions = new WeakSet();
 
 browser.runtime.onMessage.addListener(async (request) => {
   if (request?.componentsUrl && typeof request.componentsUrl === 'string' && !componentUrls.includes(request.componentsUrl)) {
@@ -177,16 +187,16 @@ const setDropdownSelectQuestions = question => {
 };
 
 const initYeNoQuestions = question => {
-  const currentIteration = iteration;
+  if (processedYesNoContainers.has(question.questionDiv))
+    return;
+  processedYesNoContainers.add(question.questionDiv);
+
   const questionElement = deepHtmlSearch(question.questionDiv, `.img_question`);
 
   if (!questionElement)
     return;
 
   questionElement.parentElement?.addEventListener('click', e => {
-    if (currentIteration !== iteration)
-      return;
-
     const questionElement = deepHtmlSearch(e.target, `.img_question`);
 
     for (const item of question.items) {
@@ -206,8 +216,6 @@ const initYeNoQuestions = question => {
   const noButton = deepHtmlSearch(question.questionDiv, `.user_selects_no`);
 
   yesButton?.addEventListener('mouseover', e => {
-    if (currentIteration !== iteration)
-      return;
     if (e.ctrlKey) {
       const questionElement = deepHtmlSearch(question.questionDiv, `.img_question`);
 
@@ -225,8 +233,6 @@ const initYeNoQuestions = question => {
   });
 
   noButton?.addEventListener('mouseover', e => {
-    if (currentIteration !== iteration)
-      return;
     if (e.ctrlKey) {
       const questionElement = deepHtmlSearch(question.questionDiv, `.img_question`);
 
@@ -245,123 +251,128 @@ const initYeNoQuestions = question => {
 };
 
 const setOpenTextInputQuestions = question => {
-  const currentIteration = iteration;
-
   question.items.forEach((item, i) => {
     const questionElement = deepHtmlSearch(question.questionDiv, '#' + CSS.escape(`${question.id}-option-${i}`));
     const button = deepHtmlSearch(question.questionDiv, `.current-item-${i}`, true);
 
-    questionElement?.addEventListener('click', () => {
-      if (currentIteration !== iteration)
-        return;
+    if (questionElement && !processedOpenTextQuestions.has(questionElement)) {
+      processedOpenTextQuestions.add(questionElement);
 
-      setTimeout(() => {
-        button.click();
-        const currentQuestion = questionElement?.textContent?.trim();
-        const position = question.items.find(item => item._options.text.trim() === currentQuestion)?.position?.[0];
+      questionElement.addEventListener('click', () => {
+        setTimeout(() => {
+          button.click();
+          const currentQuestion = questionElement.textContent?.trim();
+          const position = question.items.find(item => item._options.text.trim() === currentQuestion)?.position?.[0];
 
-        if (position) {
-          setTimeout(() => {
-            const input = deepHtmlSearch(question.questionDiv, `[data-target="${position}"]`);
-            if (input) {
-              input?.click();
-            } else {
-              question.questionDiv.click();
-            }
-          }, 100);
-        }
-      }, 100);
-    });
-
-    button?.addEventListener('click', () => {
-      if (currentIteration !== iteration)
-        return;
-
-      setTimeout(() => {
-        const currentQuestion = questionElement?.textContent?.trim();
-        const position = question.items.find(item => item._options.text.trim() === currentQuestion)?.position?.[0];
-
-        if (position) {
-          setTimeout(() => {
-            const input = deepHtmlSearch(question.questionDiv, `[data-target="${position}"]`);
-
-            input?.addEventListener('mouseover', e => {
-              if (currentIteration !== iteration)
-                return;
-              if (e.ctrlKey) {
-                input.click();
+          if (position) {
+            setTimeout(() => {
+              const input = deepHtmlSearch(question.questionDiv, `[data-target="${position}"]`);
+              if (input) {
+                input?.click();
+              } else {
+                question.questionDiv.click();
               }
-            });
-          }, 100);
-        }
-      }, 100);
-    });
+            }, 100);
+          }
+        }, 100);
+      });
+    }
+
+    if (button && !processedOpenTextButtons.has(button)) {
+      processedOpenTextButtons.add(button);
+
+      button.addEventListener('click', () => {
+        setTimeout(() => {
+          const currentQuestion = questionElement?.textContent?.trim();
+          const position = question.items.find(item => item._options.text.trim() === currentQuestion)?.position?.[0];
+
+          if (position) {
+            setTimeout(() => {
+              const input = deepHtmlSearch(question.questionDiv, `[data-target="${position}"]`);
+
+              if (input && !input.dataset.hoverListenerAdded) {
+                input.dataset.hoverListenerAdded = 'true';
+
+                input.addEventListener('mouseover', e => {
+                  if (e.ctrlKey) {
+                    input.click();
+                  }
+                });
+              }
+            }, 100);
+          }
+        }, 100);
+      });
+    }
   });
 };
 
 const setFillBlanksQuestions = question => {
-  const currentIteration = iteration;
   const questionDivs = [...deepHtmlSearch(question.questionDiv, '.fillblanks__item', true, question.answersLength)];
 
-  if (questionDivs.length > 0) {
-    questionDivs.forEach(questionDiv => {
-      const textContent = questionDiv.textContent.trim();
+  questionDivs.forEach(questionDiv => {
+    if (processedFillBlankDivs.has(questionDiv))
+      return;
+    processedFillBlankDivs.add(questionDiv);
 
-      for (const item of question.items) {
-        if (textContent.startsWith(removeTagsFromString(item.preText)) && textContent.endsWith(removeTagsFromString(item.postText))) {
-          for (const option of item._options) {
-            if (option._isCorrect) {
-              const dropdownItems = [...deepHtmlSearch(questionDiv, '.dropdown__item', true, item._options.length)];
+    const textContent = questionDiv.textContent.trim();
 
-              for (const dropdownItem of dropdownItems) {
-                if (dropdownItem.textContent.trim() === option.text.trim()) {
-                  questionDiv.addEventListener('click', (e) => {
-                    if (currentIteration !== iteration)
-                      return;
-                    if (!e.target.textContent?.trim())
-                      return;
+    for (const item of question.items) {
+      if (textContent.startsWith(removeTagsFromString(item.preText)) && textContent.endsWith(removeTagsFromString(item.postText))) {
+        for (const option of item._options) {
+          if (option._isCorrect) {
+            const dropdownItems = [...deepHtmlSearch(questionDiv, '.dropdown__item', true, item._options.length)];
+
+            for (const dropdownItem of dropdownItems) {
+              if (processedFillBlankOptions.has(dropdownItem))
+                break;
+              processedFillBlankOptions.add(dropdownItem);
+
+              if (dropdownItem.textContent.trim() === option.text.trim()) {
+                questionDiv.addEventListener('click', (e) => {
+                  if (!e.target.textContent?.trim())
+                    return;
+                  dropdownItem.click();
+                });
+
+                dropdownItem.addEventListener('mouseover', e => {
+                  if (e.ctrlKey)
                     dropdownItem.click();
-                  });
-
-                  dropdownItem.addEventListener('mouseover', e => {
-                    if (currentIteration !== iteration)
-                      return;
-                    if (e.ctrlKey)
-                      dropdownItem.click();
-                  });
-                  break;
-                }
+                });
+                break;
               }
-              break;
             }
+            break;
           }
-          break;
         }
+        break;
       }
-    });
-  }
+    }
+  });
 };
 
 const setTableDropdownQuestions = question => {
-  const currentIteration = iteration;
   const sectionDivs = Array.from(deepHtmlSearch(question.questionDiv, 'tbody tr', true, question.answersLength));
 
   sectionDivs.forEach((section, i) => {
+    if (processedTableRows.has(section))
+      return;
+    processedTableRows.add(section);
+
     const optionElements = Array.from(deepHtmlSearch(section, '[role="option"]', true, question.items[i]._options.length));
     const correctOption = question.items[i]._options.find(option => option._isCorrect);
 
     for (const optionElement of optionElements) {
+      if (processedTableOptions.has(optionElement))
+        break;
+      processedTableOptions.add(optionElement);
+
       if (optionElement.textContent.trim() === correctOption.text.trim()) {
         section.addEventListener('click', () => {
-          if (currentIteration !== iteration)
-            return;
-
           optionElement.click();
         });
 
         optionElement.addEventListener('mouseover', e => {
-          if (currentIteration !== iteration)
-            return;
           if (e.ctrlKey) {
             optionElement.click();
           }
@@ -373,16 +384,15 @@ const setTableDropdownQuestions = question => {
 };
 
 const initClickListeners = () => {
-  const currentIteration = iteration;
-
   questions.forEach((question) => {
-    if (question.skip)
+    if (question.skip || !question.questionElement)
       return;
 
-    question.questionElement?.addEventListener('click', () => {
-      if (currentIteration !== iteration)
-        return;
+    if (processedQuestionElements.has(question.questionElement))
+      return;
+    processedQuestionElements.add(question.questionElement);
 
+    question.questionElement.addEventListener('click', () => {
       if (question.questionType === 'basic') {
         const component = components.find(c => c._id === question.id);
 
@@ -408,8 +418,6 @@ const initClickListeners = () => {
 };
 
 const initHoverListeners = () => {
-  const currentIteration = iteration;
-
   questions.forEach((question) => {
     if (question.skip)
       return;
@@ -418,10 +426,11 @@ const initHoverListeners = () => {
 
     if (question.questionType === 'basic') {
       question.inputs.forEach(({input, label}, i) => {
-        label?.addEventListener('mouseover', e => {
-          if (currentIteration !== iteration)
-            return;
+        if (!label || processedLabels.has(label))
+          return;
+        processedLabels.add(label);
 
+        label.addEventListener('mouseover', e => {
           if (e.ctrlKey) {
             if (input.checked) {
               label.click();
@@ -435,10 +444,11 @@ const initHoverListeners = () => {
       });
     } else if (question.questionType === 'match') {
       question.inputs.forEach(input => {
-        input[0]?.addEventListener('mouseover', e => {
-          if (currentIteration !== iteration)
-            return;
+        if (!input[0] || processedMatchPairs.has(input[0]))
+          return;
+        processedMatchPairs.add(input[0]);
 
+        input[0].addEventListener('mouseover', e => {
           if (e.ctrlKey) {
             input[0].click();
             input[1].click();
@@ -446,12 +456,15 @@ const initHoverListeners = () => {
         });
       });
     } else if (question.questionType === 'dropdownSelect') {
-      question.inputs[0]?.addEventListener('mouseover', e => {
-        if (currentIteration !== iteration)
-          return;
+      const optionEl = question.inputs[0];
 
+      if (!optionEl || processedDropdownOptions.has(optionEl))
+        return;
+      processedDropdownOptions.add(optionEl);
+
+      optionEl.addEventListener('mouseover', e => {
         if (e.ctrlKey) {
-          question.inputs[0].click();
+          optionEl.click();
         }
       });
     }
@@ -473,7 +486,6 @@ const setIsReady = () => {
 
 const main = async () => {
   questions = [];
-  iteration++;
   await setQuestionSections();
   setQuestionElements();
   initClickListeners();
@@ -481,17 +493,16 @@ const main = async () => {
 };
 
 const suspendMain = () => {
-  let isReady = false;
+  if (isSuspendRunning) return;
+
   isSuspendRunning = true;
 
   const checking = async () => {
-    if (!isReady) {
-      isReady = !!setIsReady();
-    } else {
+    if (setIsReady()) {
       clearInterval(interval);
-      await main();
-      isInitiated = true;
-      isSuspendRunning = false;
+      main().finally(() => {
+        isSuspendRunning = false;
+      });
     }
   };
 
@@ -499,14 +510,21 @@ const suspendMain = () => {
 };
 
 if (window) {
-  let previousUrl = '';
-
   setInterval(() => {
-    if (window.location.href !== previousUrl) {
-      previousUrl = window.location.href;
+    if (isSuspendRunning || components.length === 0)
+      return;
 
-      if (!isSuspendRunning)
-        suspendMain();
+    let visibleContainers = 0;
+    for (const component of components) {
+      if (deepHtmlSearch(document, `.${CSS.escape(component._id)}`)) {
+        visibleContainers++;
+      }
+    }
+
+    const processedCount = questions.length;
+
+    if (visibleContainers !== processedCount) {
+      suspendMain();
     }
   }, 1000);
 }
