@@ -1,5 +1,6 @@
 <a href="https://chromewebstore.google.com/detail/meowcad-solver/ngkonaonfgfbnobbacojipgndihanmca"><img alt="Chrome Extension" width="218px" src="assets/chrome-extension-logo.png"/></a>
 <a href="https://addons.mozilla.org/en-US/firefox/addon/meowcad-solver/"><img alt="Firefox Addons" width="218px" src="assets/firefox-addon-logo.svg"/></a>
+<a href="https://microsoftedge.microsoft.com/addons/detail/meowcad-solver/pfcpnapfgmahllodcniddcpkelhkdicm"><img alt="Edge Addons" width="150px" src="assets/edge-extension-logo.png"/></a>
 
 # NetAcad Solver
 
