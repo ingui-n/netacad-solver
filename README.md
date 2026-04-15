@@ -8,6 +8,8 @@ Browser extension allowing you to pass all the NetAcad quizzes
 
 <img alt="My generous offer" width="300" src="assets/screenshots/my-offer.jpg"/>
 
+⚠️ Doesn't work on final exams. ⚠️
+
 ## Installation
 
 ### Automatic Installation:
