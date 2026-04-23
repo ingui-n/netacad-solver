@@ -53,7 +53,7 @@ Browser extension allowing you to pass all the NetAcad quizzes
 - Clicking a tabset/accordion starts traversing the remaining items automatically without repeating finished groups
 - Clicking a page tracer resource opens it and then closes the popup automatically
 - Submit popups/notify dialogs are closed automatically when NetAcad shows a close button
-- Pressing `Alt` toggles a fast sweep mode that scrolls and clicks each useful interactive element once, prioritizing MCQ and matching activities
+- Pressing `Alt` toggles a full navigation mode for non-evaluative course content: it scrolls through videos/tabs/accordions/resources, closes popups, and advances page-by-page with next/outline navigation
 
 ![demo.gif](assets/videos/demo.gif)
 ![demo-hover.gif](assets/videos/demo-hover.gif)

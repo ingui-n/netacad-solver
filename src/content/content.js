@@ -22,7 +22,11 @@ const MATCHING_DROPDOWN_SELECTORS = 'matching-dropdown-view, .matching__item_mai
 const MATCHING_DROPDOWN_CONTAINER_SELECTORS = '.matching__widget, matching-view';
 const OBJECT_MATCHING_SELECTORS = '.objectMatching-category-item, .objectMatching-option-item';
 const OBJECT_MATCHING_CONTAINER_SELECTORS = '.objectMatching__widget, object-matching-view';
+const NEXT_PAGE_SELECTORS = '.moduleNavBtn--sFwjV.next--3dfUb, button.next--3dfUb';
+const OUTLINE_NAV_TARGET_SELECTORS = '#course-outline .blockContainer--9r605, #course-outline .subModuleBtn--lZq5k';
+const OUTLINE_MODULE_TOGGLE_SELECTORS = '#course-outline .nodeInfoContainer--V7fAp';
 const ALT_SWEEP_INTERVAL = 18;
+const ALT_NAVIGATION_DELAY = 900;
 const AUTOMATION_CLICK_DELAY = 140;
 const PAGETRACER_RETRY_DELAY = 120;
 const PAGETRACER_RETRY_LIMIT = 10;
@@ -45,7 +49,7 @@ const pendingVideoElements = new WeakSet();
 const processedInteractionDocuments = new WeakSet();
 const processedMatchingContainers = new WeakSet();
 const processedKeyboardDocuments = new WeakSet();
-const processedAltSweepElements = new WeakSet();
+let processedAltSweepElements = new WeakSet();
 const autoSubmitState = {
   requestId: 0,
   timerId: null,
@@ -225,16 +229,50 @@ const getOrderedElements = (container, selector) => [...container.querySelectorA
   .filter(isElementVisible)
   .sort((a, b) => Number(a.dataset.index || 0) - Number(b.dataset.index || 0));
 
+const resetAltSweepTracking = () => {
+  processedAltSweepElements = new WeakSet();
+};
+
+const hasStatusAlt = (element, statuses) => [...element.querySelectorAll('img[alt]')]
+  .some(img => statuses.includes(normalizeText(img.alt)));
+
+const findNextOutlineTarget = () => {
+  const directTarget = [...document.querySelectorAll(OUTLINE_NAV_TARGET_SELECTORS)]
+    .find(element => isElementClickable(element)
+      && !element.classList.contains('active--39fPI')
+      && hasStatusAlt(element, ['start', 'in progress']));
+
+  if (directTarget)
+    return directTarget;
+
+  return [...document.querySelectorAll(OUTLINE_MODULE_TOGGLE_SELECTORS)]
+    .find(element => isElementClickable(element)
+      && !element.closest('.nodeContainerShowProgress--O0RO1')?.querySelector('.progressbarLabel--LPTEn')?.textContent?.includes('100%')) || null;
+};
+
+const handleAltNavigationAdvance = () => {
+  const nextPageButton = findFirstClickable(document, NEXT_PAGE_SELECTORS);
+  const outlineTarget = nextPageButton ? null : findNextOutlineTarget();
+  const target = nextPageButton || outlineTarget;
+
+  if (!target) {
+    stopAltSweep();
+    return false;
+  }
+
+  clickElement(target);
+  resetAltSweepTracking();
+  altSweepState.timerId = setTimeout(runAltSweep, ALT_NAVIGATION_DELAY);
+  return true;
+};
+
 const getAltSweepCandidates = () => {
   const groups = [
-    '.mcq__item-label.js-item-label:not(.is-disabled):not(.is-selected)',
-    '.mcq__item.js-mcq-item:not(.is-disabled):not(.is-correct):not(.is-incorrect)',
-    '.objectMatching-category-item:not(.is-disabled), .objectMatching-option-item:not(.is-disabled)',
-    'matching-dropdown-view, .matching__item_main',
+    VIDEO_SELECTORS,
     '.accordion__item-btn[aria-expanded="false"]',
     '.tabs__nav-item-btn[aria-selected="false"], .js-tabs-nav-item-btn-click[aria-selected="false"], [role="tab"][aria-selected="false"]',
     '.pageTracer-button, [data-page-tracer-button-id]',
-    'button[type="submit"], input[type="submit"], .js-btn-action, .btn__action'
+    '.js-notify-close-btn, .notify__close-btn'
   ];
 
   const candidates = [];
@@ -250,7 +288,7 @@ const getAltSweepCandidates = () => {
       }
 
       elements.forEach(element => {
-        const target = element.matches?.(MATCHING_DROPDOWN_SELECTORS) ? getShadowClickable(element) : element;
+        const target = element;
 
         if (!target || processedAltSweepElements.has(target) || !isElementClickable(target))
           return;
@@ -282,7 +320,7 @@ const runAltSweep = () => {
   const [candidate] = getAltSweepCandidates();
 
   if (!candidate) {
-    stopAltSweep();
+    handleAltNavigationAdvance();
     return;
   }
 
@@ -297,6 +335,7 @@ const toggleAltSweep = () => {
     return;
   }
 
+  resetAltSweepTracking();
   altSweepState.enabled = true;
   runAltSweep();
 };
