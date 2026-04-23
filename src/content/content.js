@@ -7,6 +7,19 @@ let questions = [];
 const componentUrls = [];
 const AUTO_SUBMIT_KEYWORDS = ['submit', 'enviar', 'check', 'check answer'];
 const AUTO_SUBMIT_SELECTORS = 'button, [role="button"], input[type="button"], input[type="submit"], .js-btn-action, .btn__action';
+const AUTO_SUBMIT_RETRY_DELAY = 120;
+const AUTO_SUBMIT_RETRY_LIMIT = 8;
+const TABS_SELECTORS = '.tabs__nav-item-btn, .js-tabs-nav-item-btn-click, .tabs__nav button, .tabs__nav-inner button, [role="tab"], [aria-controls*="tabpanel"]';
+const TABS_CONTAINER_SELECTORS = '.tabs__nav, .component.tabs, .tab__widget, .tabs__widget, tabs-view';
+const ACCORDION_SELECTORS = '.accordion__item-btn, [aria-controls^="accordion-item"]';
+const ACCORDION_CONTAINER_SELECTORS = '.accordion__widget, .component.accordion, accordion-view';
+const VIDEO_SELECTORS = 'video, .vjs-tech, iframe[src*="brightcovePlayer"]';
+const VIDEO_CONTAINER_SELECTORS = '.component__widget, .video__widget, .component, block-view, article-view';
+const PAGE_TRACER_SELECTORS = '.pageTracer-button, [data-page-tracer-button-id], pagetracer-view button.btn__action';
+const PAGE_TRACER_CLOSE_SELECTORS = '#close-btn, .close-button';
+const AUTOMATION_CLICK_DELAY = 140;
+const PAGETRACER_RETRY_DELAY = 120;
+const PAGETRACER_RETRY_LIMIT = 10;
 
 const processedQuestionElements = new WeakSet();
 const processedLabels = new WeakSet();
@@ -19,12 +32,24 @@ const processedTableRows = new WeakSet();
 const processedOpenTextButtons = new WeakSet();
 const processedTableOptions = new WeakSet();
 const processedFillBlankOptions = new WeakSet();
+const processedTabsContainers = new WeakSet();
+const processedAccordionContainers = new WeakSet();
+const processedVideoElements = new WeakSet();
+const pendingVideoElements = new WeakSet();
+const processedInteractionDocuments = new WeakSet();
 const autoSubmitState = {
   requestId: 0,
-  frameId: null,
+  timerId: null,
   lastButton: null,
-  lastClickAt: 0
+  lastClickAt: 0,
+  scope: null
 };
+const pageTracerState = {
+  requestId: 0,
+  timerId: null
+};
+
+let globalInteractionAutomationsInitialized = false;
 
 const normalizeText = value => value?.replace(/\s+/g, ' ').trim().toLowerCase() || '';
 
@@ -50,6 +75,263 @@ const isElementDisabled = element => {
     || element.classList?.contains('is-disabled')
     || element.classList?.contains('disabled')
   );
+};
+
+const isElementClickable = element => isElementVisible(element) && !isElementDisabled(element);
+
+const clickElement = element => {
+  if (!element || !isElementClickable(element))
+    return false;
+
+  element.click();
+  return true;
+};
+
+const getEventPathElements = event => (event.composedPath?.() || []).filter(node => node?.nodeType === Node.ELEMENT_NODE);
+
+const findPathElement = (event, selector) => getEventPathElements(event)
+  .find(element => element.matches?.(selector)) || null;
+
+const findClosestPathElement = (event, selector) => getEventPathElements(event)
+  .find(element => element.closest?.(selector))?.closest?.(selector) || null;
+
+const findFirstClickable = (scope, selectors) => {
+  for (const root of getScopedRoots(scope)) {
+    let elements = [];
+
+    try {
+      elements = [...root.querySelectorAll(selectors)];
+    } catch (e) {
+      continue;
+    }
+
+    const match = elements.find(isElementClickable);
+
+    if (match)
+      return match;
+  }
+
+  return null;
+};
+
+const findVideoTrigger = event => {
+  const directMatch = findPathElement(event, VIDEO_SELECTORS);
+
+  if (directMatch)
+    return directMatch;
+
+  const containerMatch = findClosestPathElement(event, VIDEO_CONTAINER_SELECTORS);
+
+  if (containerMatch)
+    return containerMatch;
+
+  return getEventPathElements(event).find(element => {
+    try {
+      return Boolean(element.querySelector?.(VIDEO_SELECTORS));
+    } catch (e) {
+      return false;
+    }
+  }) || null;
+};
+
+const getScopedRoots = scope => {
+  if (!scope || scope === document)
+    return getSearchRoots(document);
+
+  const roots = [];
+
+  if (scope.querySelectorAll) {
+    getSearchRoots(scope, roots);
+  } else if (scope.ownerDocument) {
+    getSearchRoots(scope.ownerDocument, roots);
+  }
+
+  if (!roots.includes(document)) {
+    getSearchRoots(document, roots);
+  }
+
+  return roots;
+};
+
+const findButtonsByKeywords = (scope, selectors, keywords) => {
+  const normalizedKeywords = keywords.map(normalizeText);
+
+  for (const root of getScopedRoots(scope)) {
+    let elements = [];
+
+    try {
+      elements = [...root.querySelectorAll(selectors)];
+    } catch (e) {
+      continue;
+    }
+
+    const match = elements.find(element => {
+      if (!isElementClickable(element))
+        return false;
+
+      const text = normalizeText(
+        element.textContent
+        || element.value
+        || element.getAttribute?.('aria-label')
+        || element.getAttribute?.('title')
+      );
+
+      return normalizedKeywords.some(keyword => text.includes(keyword));
+    });
+
+    if (match)
+      return match;
+  }
+
+  return null;
+};
+
+const getOrderedElements = (container, selector) => [...container.querySelectorAll(selector)]
+  .filter(isElementVisible)
+  .sort((a, b) => Number(a.dataset.index || 0) - Number(b.dataset.index || 0));
+
+const scheduleClicks = (elements, delay = AUTOMATION_CLICK_DELAY) => {
+  elements.forEach((element, index) => {
+    setTimeout(() => {
+      clickElement(element);
+    }, index * delay);
+  });
+};
+
+const finalizeVideoElement = video => {
+  if (!video || processedVideoElements.has(video) || pendingVideoElements.has(video))
+    return false;
+
+  const complete = () => {
+    if (processedVideoElements.has(video))
+      return;
+
+    try {
+      if (Number.isFinite(video.duration) && video.duration > 0) {
+        video.currentTime = Math.max(video.duration - 0.01, 0);
+      }
+    } catch (e) {
+    }
+
+    try {
+      video.pause();
+    } catch (e) {
+    }
+
+    ['timeupdate', 'seeking', 'seeked', 'ended', 'pause'].forEach(type => {
+      try {
+        video.dispatchEvent(new Event(type, {bubbles: true}));
+      } catch (e) {
+      }
+    });
+
+    pendingVideoElements.delete(video);
+    processedVideoElements.add(video);
+  };
+
+  if (Number.isFinite(video.duration) && video.duration > 0) {
+    complete();
+  } else {
+    pendingVideoElements.add(video);
+    ['loadedmetadata', 'loadeddata', 'durationchange', 'canplay'].forEach(type => {
+      video.addEventListener(type, complete, {once: true});
+    });
+    setTimeout(complete, 50);
+    setTimeout(complete, 400);
+  }
+
+  return true;
+};
+
+const finalizeVideosNear = trigger => {
+  const scope = trigger?.closest?.('.component, .component__widget, .block, article-view') || trigger || document;
+  let completed = false;
+
+  for (const root of getScopedRoots(scope)) {
+    let videos = [];
+
+    try {
+      videos = [...root.querySelectorAll('video')].filter(isElementVisible);
+    } catch (e) {
+      continue;
+    }
+
+    videos.forEach(video => {
+      if (finalizeVideoElement(video)) {
+        completed = true;
+      }
+    });
+  }
+
+  return completed;
+};
+
+const automateTabsFrom = trigger => {
+  const container = trigger?.closest?.(TABS_CONTAINER_SELECTORS);
+
+  if (!container || processedTabsContainers.has(container))
+    return false;
+
+  const buttons = getOrderedElements(container, TABS_SELECTORS)
+    .filter(button => button.getAttribute('aria-selected') !== 'true');
+
+  if (buttons.length === 0)
+    return false;
+
+  processedTabsContainers.add(container);
+  scheduleClicks(buttons);
+  return true;
+};
+
+const automateAccordionFrom = trigger => {
+  const container = trigger?.closest?.(ACCORDION_CONTAINER_SELECTORS);
+
+  if (!container || processedAccordionContainers.has(container))
+    return false;
+
+  const buttons = getOrderedElements(container, ACCORDION_SELECTORS)
+    .filter(button => button.getAttribute('aria-expanded') !== 'true');
+
+  if (buttons.length === 0)
+    return false;
+
+  processedAccordionContainers.add(container);
+  scheduleClicks(buttons);
+  return true;
+};
+
+const schedulePageTracerClose = scope => {
+  pageTracerState.requestId += 1;
+
+  if (pageTracerState.timerId) {
+    clearTimeout(pageTracerState.timerId);
+    pageTracerState.timerId = null;
+  }
+
+  const requestId = pageTracerState.requestId;
+  let attempts = 0;
+
+  const tryClose = () => {
+    if (requestId !== pageTracerState.requestId)
+      return;
+
+    attempts += 1;
+    const button = findFirstClickable(scope, PAGE_TRACER_CLOSE_SELECTORS)
+      || findButtonsByKeywords(scope, PAGE_TRACER_CLOSE_SELECTORS, ['close', 'cerrar']);
+
+    if (button && clickElement(button)) {
+      pageTracerState.timerId = null;
+      return;
+    }
+
+    if (attempts < PAGETRACER_RETRY_LIMIT) {
+      pageTracerState.timerId = setTimeout(tryClose, PAGETRACER_RETRY_DELAY);
+    } else {
+      pageTracerState.timerId = null;
+    }
+  };
+
+  pageTracerState.timerId = setTimeout(tryClose, PAGETRACER_RETRY_DELAY);
 };
 
 const getSearchRoots = (root, roots = [], visited = new WeakSet()) => {
@@ -97,26 +379,7 @@ const isAutoSubmitButton = element => {
   return AUTO_SUBMIT_KEYWORDS.some(keyword => text.includes(keyword));
 };
 
-const findAutoSubmitButton = () => {
-  const roots = getSearchRoots(document);
-
-  for (const root of roots) {
-    let buttons = [];
-
-    try {
-      buttons = [...root.querySelectorAll(AUTO_SUBMIT_SELECTORS)];
-    } catch (e) {
-      continue;
-    }
-
-    const match = buttons.find(button => isAutoSubmitButton(button) && !isElementDisabled(button));
-
-    if (match)
-      return match;
-  }
-
-  return null;
-};
+const findAutoSubmitButton = scope => findButtonsByKeywords(scope, AUTO_SUBMIT_SELECTORS, AUTO_SUBMIT_KEYWORDS);
 
 const clickAutoSubmitButton = button => {
   if (!button)
@@ -133,12 +396,13 @@ const clickAutoSubmitButton = button => {
   return true;
 };
 
-const scheduleAutoSubmit = () => {
+const scheduleAutoSubmit = scope => {
   autoSubmitState.requestId += 1;
+  autoSubmitState.scope = scope || document;
 
-  if (autoSubmitState.frameId) {
-    cancelAnimationFrame(autoSubmitState.frameId);
-    autoSubmitState.frameId = null;
+  if (autoSubmitState.timerId) {
+    clearTimeout(autoSubmitState.timerId);
+    autoSubmitState.timerId = null;
   }
 
   const requestId = autoSubmitState.requestId;
@@ -149,21 +413,65 @@ const scheduleAutoSubmit = () => {
       return;
 
     attempts += 1;
-    const button = findAutoSubmitButton();
+    const button = findAutoSubmitButton(autoSubmitState.scope);
 
     if (button && clickAutoSubmitButton(button)) {
-      autoSubmitState.frameId = null;
+      autoSubmitState.timerId = null;
       return;
     }
 
-    if (attempts < 60) {
-      autoSubmitState.frameId = requestAnimationFrame(trySubmit);
+    if (attempts < AUTO_SUBMIT_RETRY_LIMIT) {
+      autoSubmitState.timerId = setTimeout(trySubmit, AUTO_SUBMIT_RETRY_DELAY);
     } else {
-      autoSubmitState.frameId = null;
+      autoSubmitState.timerId = null;
     }
   };
 
-  autoSubmitState.frameId = requestAnimationFrame(trySubmit);
+  autoSubmitState.timerId = setTimeout(trySubmit, AUTO_SUBMIT_RETRY_DELAY);
+};
+
+const initGlobalInteractionAutomations = () => {
+  const attachInteractionAutomation = rootDocument => {
+    if (!rootDocument || processedInteractionDocuments.has(rootDocument))
+      return;
+    processedInteractionDocuments.add(rootDocument);
+
+    rootDocument.addEventListener('click', event => {
+    if (!event.isTrusted)
+      return;
+
+    const videoTrigger = findVideoTrigger(event);
+    if (videoTrigger) {
+      finalizeVideosNear(videoTrigger);
+    }
+
+    const tabsTrigger = findPathElement(event, TABS_SELECTORS);
+    if (tabsTrigger) {
+      automateTabsFrom(tabsTrigger);
+    }
+
+    const pageTracerTrigger = findPathElement(event, PAGE_TRACER_SELECTORS);
+    if (pageTracerTrigger) {
+      schedulePageTracerClose(pageTracerTrigger);
+    }
+
+    const accordionTrigger = findPathElement(event, ACCORDION_SELECTORS);
+    if (accordionTrigger) {
+      automateAccordionFrom(accordionTrigger);
+    }
+    }, true);
+  };
+
+  if (!globalInteractionAutomationsInitialized) {
+    globalInteractionAutomationsInitialized = true;
+    attachInteractionAutomation(document);
+  }
+
+  for (const root of getScopedRoots(document)) {
+    if (root.nodeType === Node.DOCUMENT_NODE) {
+      attachInteractionAutomation(root);
+    }
+  }
 };
 
 browser.runtime.onMessage.addListener(async (request) => {
@@ -352,11 +660,11 @@ const initYeNoQuestions = question => {
             if (item._shouldBeSelected) {
               const yesButton = deepHtmlSearch(question.questionDiv, `.user_selects_yes`);
               yesButton.click();
-              scheduleAutoSubmit();
+              scheduleAutoSubmit(question.questionDiv);
             } else {
               const noButton = deepHtmlSearch(question.questionDiv, `.user_selects_no`);
               noButton.click();
-              scheduleAutoSubmit();
+              scheduleAutoSubmit(question.questionDiv);
             }
           }
         }
@@ -374,7 +682,7 @@ const initYeNoQuestions = question => {
               if (item._graphic.alt === questionElement.alt) {
                 if (item._shouldBeSelected) {
                   yesButton.click();
-                  scheduleAutoSubmit();
+                  scheduleAutoSubmit(question.questionDiv);
                 }
                 break;
               }
@@ -392,7 +700,7 @@ const initYeNoQuestions = question => {
               if (item._graphic.alt === questionElement.alt) {
                 if (!item._shouldBeSelected) {
                   noButton.click();
-                  scheduleAutoSubmit();
+                  scheduleAutoSubmit(question.questionDiv);
                 }
                 break;
               }
@@ -421,7 +729,7 @@ const setOpenTextInputQuestions = question => {
               const input = deepHtmlSearch(question.questionDiv, `[data-target="${position}"]`);
               if (input) {
                 input?.click();
-                scheduleAutoSubmit();
+                scheduleAutoSubmit(question.questionDiv);
               } else {
                 question.questionDiv.click();
               }
@@ -449,7 +757,7 @@ const setOpenTextInputQuestions = question => {
                 input.addEventListener('mouseover', e => {
                   if (e.ctrlKey) {
                     input.click();
-                    scheduleAutoSubmit();
+                    scheduleAutoSubmit(question.questionDiv);
                   }
                 });
               }
@@ -487,13 +795,13 @@ const setFillBlanksQuestions = question => {
                   if (!e.target.textContent?.trim())
                     return;
                   dropdownItem.click();
-                  scheduleAutoSubmit();
+                  scheduleAutoSubmit(question.questionDiv);
                 });
 
                 dropdownItem.addEventListener('mouseover', e => {
                   if (e.ctrlKey) {
                     dropdownItem.click();
-                    scheduleAutoSubmit();
+                    scheduleAutoSubmit(question.questionDiv);
                   }
                 });
                 break;
@@ -527,13 +835,13 @@ const setTableDropdownQuestions = question => {
       if (optionElement.textContent.trim() === correctOption.text.trim()) {
         section.addEventListener('click', () => {
           optionElement.click();
-          scheduleAutoSubmit();
+          scheduleAutoSubmit(question.questionDiv);
         });
 
         optionElement.addEventListener('mouseover', e => {
           if (e.ctrlKey) {
             optionElement.click();
-            scheduleAutoSubmit();
+            scheduleAutoSubmit(question.questionDiv);
           }
         });
         break;
@@ -564,16 +872,16 @@ const initClickListeners = () => {
             setTimeout(() => label.click(), 10);
           }
         });
-        scheduleAutoSubmit();
+        scheduleAutoSubmit(question.questionDiv);
       } else if (question.questionType === 'match') {
         question.inputs.forEach(input => {
           input[0].click();
           input[1].click();
         });
-        scheduleAutoSubmit();
+        scheduleAutoSubmit(question.questionDiv);
       } else if (question.questionType === 'dropdownSelect') {
         question.inputs[0]?.click();
-        scheduleAutoSubmit();
+        scheduleAutoSubmit(question.questionDiv);
       }
     });
   });
@@ -600,7 +908,7 @@ const initHoverListeners = () => {
 
             if (component._items[i]._shouldBeSelected) {
               setTimeout(() => label.click(), 10);
-              scheduleAutoSubmit();
+              scheduleAutoSubmit(question.questionDiv);
             }
           }
         });
@@ -615,7 +923,7 @@ const initHoverListeners = () => {
           if (e.ctrlKey) {
             input[0].click();
             input[1].click();
-            scheduleAutoSubmit();
+            scheduleAutoSubmit(question.questionDiv);
           }
         });
       });
@@ -629,7 +937,7 @@ const initHoverListeners = () => {
       optionEl.addEventListener('mouseover', e => {
         if (e.ctrlKey) {
           optionEl.click();
-          scheduleAutoSubmit();
+          scheduleAutoSubmit(question.questionDiv);
         }
       });
     }
@@ -650,6 +958,7 @@ const setIsReady = () => {
 };
 
 const main = async () => {
+  initGlobalInteractionAutomations();
   questions = [];
   await setQuestionSections();
   setQuestionElements();
@@ -675,7 +984,10 @@ const suspendMain = () => {
 };
 
 if (window) {
+  initGlobalInteractionAutomations();
   setInterval(() => {
+    initGlobalInteractionAutomations();
+
     if (isSuspendRunning || components.length === 0)
       return;
 
