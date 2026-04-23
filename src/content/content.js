@@ -5,6 +5,31 @@ let isSuspendRunning = false;
 const components = [];
 let questions = [];
 const componentUrls = [];
+const AUTO_SUBMIT_KEYWORDS = ['submit', 'enviar', 'check', 'check answer'];
+const AUTO_SUBMIT_SELECTORS = 'button, [role="button"], input[type="button"], input[type="submit"], .js-btn-action, .btn__action';
+const AUTO_SUBMIT_RETRY_DELAY = 120;
+const AUTO_SUBMIT_RETRY_LIMIT = 8;
+const TABS_SELECTORS = '.tabs__nav-item-btn, .js-tabs-nav-item-btn-click, .tabs__nav button, .tabs__nav-inner button, [role="tab"], [aria-controls*="tabpanel"]';
+const TABS_CONTAINER_SELECTORS = '.tabs__nav, .component.tabs, .tab__widget, .tabs__widget, tabs-view';
+const ACCORDION_SELECTORS = '.accordion__item-btn, [aria-controls^="accordion-item"]';
+const ACCORDION_CONTAINER_SELECTORS = '.accordion__widget, .component.accordion, accordion-view';
+const VIDEO_SELECTORS = 'video, .vjs-tech, iframe[src*="brightcovePlayer"]';
+const VIDEO_CONTAINER_SELECTORS = '.component__widget, .video__widget, .component, block-view, article-view';
+const PAGE_TRACER_SELECTORS = '.pageTracer-button, [data-page-tracer-button-id], pagetracer-view button.btn__action';
+const PAGE_TRACER_CLOSE_SELECTORS = '#close-btn, .close-button';
+const NOTIFY_CLOSE_SELECTORS = '.js-notify-close-btn, .notify__close-btn';
+const MATCHING_DROPDOWN_SELECTORS = 'matching-dropdown-view, .matching__item_main';
+const MATCHING_DROPDOWN_CONTAINER_SELECTORS = '.matching__widget, matching-view';
+const OBJECT_MATCHING_SELECTORS = '.objectMatching-category-item, .objectMatching-option-item';
+const OBJECT_MATCHING_CONTAINER_SELECTORS = '.objectMatching__widget, object-matching-view';
+const NEXT_PAGE_SELECTORS = '.moduleNavBtn--sFwjV.next--3dfUb, button.next--3dfUb';
+const OUTLINE_NAV_TARGET_SELECTORS = '#course-outline .blockContainer--9r605, #course-outline .subModuleBtn--lZq5k';
+const OUTLINE_MODULE_TOGGLE_SELECTORS = '#course-outline .nodeInfoContainer--V7fAp';
+const ALT_SWEEP_INTERVAL = 18;
+const ALT_NAVIGATION_DELAY = 900;
+const AUTOMATION_CLICK_DELAY = 140;
+const PAGETRACER_RETRY_DELAY = 120;
+const PAGETRACER_RETRY_LIMIT = 10;
 
 const processedQuestionElements = new WeakSet();
 const processedLabels = new WeakSet();
@@ -17,6 +42,673 @@ const processedTableRows = new WeakSet();
 const processedOpenTextButtons = new WeakSet();
 const processedTableOptions = new WeakSet();
 const processedFillBlankOptions = new WeakSet();
+const processedTabsContainers = new WeakSet();
+const processedAccordionContainers = new WeakSet();
+const processedVideoElements = new WeakSet();
+const pendingVideoElements = new WeakSet();
+const processedInteractionDocuments = new WeakSet();
+const processedMatchingContainers = new WeakSet();
+const processedKeyboardDocuments = new WeakSet();
+let processedAltSweepElements = new WeakSet();
+const autoSubmitState = {
+  requestId: 0,
+  timerId: null,
+  lastButton: null,
+  lastClickAt: 0,
+  scope: null
+};
+const pageTracerState = {
+  requestId: 0,
+  timerId: null
+};
+const notifyCloseState = {
+  requestId: 0,
+  timerId: null
+};
+const altSweepState = {
+  enabled: false,
+  timerId: null
+};
+
+let globalInteractionAutomationsInitialized = false;
+let globalKeyboardAutomationsInitialized = false;
+
+const normalizeText = value => value?.replace(/\s+/g, ' ').trim().toLowerCase() || '';
+
+const isElementVisible = element => {
+  if (!element)
+    return false;
+
+  if (element.offsetParent || element.getClientRects?.().length)
+    return true;
+
+  const style = window.getComputedStyle?.(element);
+  return style?.visibility !== 'hidden' && style?.display !== 'none';
+};
+
+const isElementDisabled = element => {
+  if (!element)
+    return true;
+
+  return Boolean(
+    element.disabled
+    || element.ariaDisabled === 'true'
+    || element.getAttribute?.('aria-disabled') === 'true'
+    || element.classList?.contains('is-disabled')
+    || element.classList?.contains('disabled')
+  );
+};
+
+const isElementClickable = element => isElementVisible(element) && !isElementDisabled(element);
+
+const clickElement = element => {
+  if (!element || !isElementClickable(element))
+    return false;
+
+  try {
+    element.scrollIntoView({block: 'center', inline: 'center'});
+  } catch (e) {
+  }
+
+  element.click();
+  return true;
+};
+
+const getEventPathElements = event => (event.composedPath?.() || []).filter(node => node?.nodeType === Node.ELEMENT_NODE);
+
+const findPathElement = (event, selector) => getEventPathElements(event)
+  .find(element => element.matches?.(selector)) || null;
+
+const findClosestPathElement = (event, selector) => getEventPathElements(event)
+  .find(element => element.closest?.(selector))?.closest?.(selector) || null;
+
+const findFirstClickable = (scope, selectors) => {
+  for (const root of getScopedRoots(scope)) {
+    let elements = [];
+
+    try {
+      elements = [...root.querySelectorAll(selectors)];
+    } catch (e) {
+      continue;
+    }
+
+    const match = elements.find(isElementClickable);
+
+    if (match)
+      return match;
+  }
+
+  return null;
+};
+
+const findVideoTrigger = event => {
+  const directMatch = findPathElement(event, VIDEO_SELECTORS);
+
+  if (directMatch)
+    return directMatch;
+
+  const containerMatch = findClosestPathElement(event, VIDEO_CONTAINER_SELECTORS);
+
+  if (containerMatch)
+    return containerMatch;
+
+  return getEventPathElements(event).find(element => {
+    try {
+      return Boolean(element.querySelector?.(VIDEO_SELECTORS));
+    } catch (e) {
+      return false;
+    }
+  }) || null;
+};
+
+const findMatchingTrigger = event => findPathElement(event, MATCHING_DROPDOWN_SELECTORS)
+  || findClosestPathElement(event, MATCHING_DROPDOWN_CONTAINER_SELECTORS);
+
+const getShadowClickable = host => {
+  const shadowRoot = host?.shadowRoot;
+
+  if (!shadowRoot)
+    return host;
+
+  return shadowRoot.querySelector('button, [role="button"], .btn__action, .dropdown__btn, .dropdown__selected, .matching__item_main') || host;
+};
+
+const getScopedRoots = scope => {
+  if (!scope || scope === document)
+    return getSearchRoots(document);
+
+  const roots = [];
+
+  if (scope.querySelectorAll) {
+    getSearchRoots(scope, roots);
+  } else if (scope.ownerDocument) {
+    getSearchRoots(scope.ownerDocument, roots);
+  }
+
+  if (!roots.includes(document)) {
+    getSearchRoots(document, roots);
+  }
+
+  return roots;
+};
+
+const findButtonsByKeywords = (scope, selectors, keywords) => {
+  const normalizedKeywords = keywords.map(normalizeText);
+
+  for (const root of getScopedRoots(scope)) {
+    let elements = [];
+
+    try {
+      elements = [...root.querySelectorAll(selectors)];
+    } catch (e) {
+      continue;
+    }
+
+    const match = elements.find(element => {
+      if (!isElementClickable(element))
+        return false;
+
+      const text = normalizeText(
+        element.textContent
+        || element.value
+        || element.getAttribute?.('aria-label')
+        || element.getAttribute?.('title')
+      );
+
+      return normalizedKeywords.some(keyword => text.includes(keyword));
+    });
+
+    if (match)
+      return match;
+  }
+
+  return null;
+};
+
+const getOrderedElements = (container, selector) => [...container.querySelectorAll(selector)]
+  .filter(isElementVisible)
+  .sort((a, b) => Number(a.dataset.index || 0) - Number(b.dataset.index || 0));
+
+const resetAltSweepTracking = () => {
+  processedAltSweepElements = new WeakSet();
+};
+
+const hasStatusAlt = (element, statuses) => [...element.querySelectorAll('img[alt]')]
+  .some(img => statuses.includes(normalizeText(img.alt)));
+
+const findNextOutlineTarget = () => {
+  const directTarget = [...document.querySelectorAll(OUTLINE_NAV_TARGET_SELECTORS)]
+    .find(element => isElementClickable(element)
+      && !element.classList.contains('active--39fPI')
+      && hasStatusAlt(element, ['start', 'in progress']));
+
+  if (directTarget)
+    return directTarget;
+
+  return [...document.querySelectorAll(OUTLINE_MODULE_TOGGLE_SELECTORS)]
+    .find(element => isElementClickable(element)
+      && !element.closest('.nodeContainerShowProgress--O0RO1')?.querySelector('.progressbarLabel--LPTEn')?.textContent?.includes('100%')) || null;
+};
+
+const handleAltNavigationAdvance = () => {
+  const nextPageButton = findFirstClickable(document, NEXT_PAGE_SELECTORS);
+  const outlineTarget = nextPageButton ? null : findNextOutlineTarget();
+  const target = nextPageButton || outlineTarget;
+
+  if (!target) {
+    stopAltSweep();
+    return false;
+  }
+
+  clickElement(target);
+  resetAltSweepTracking();
+  altSweepState.timerId = setTimeout(runAltSweep, ALT_NAVIGATION_DELAY);
+  return true;
+};
+
+const getAltSweepCandidates = () => {
+  const groups = [
+    VIDEO_SELECTORS,
+    '.accordion__item-btn[aria-expanded="false"]',
+    '.tabs__nav-item-btn[aria-selected="false"], .js-tabs-nav-item-btn-click[aria-selected="false"], [role="tab"][aria-selected="false"]',
+    '.pageTracer-button, [data-page-tracer-button-id]',
+    '.js-notify-close-btn, .notify__close-btn'
+  ];
+
+  const candidates = [];
+
+  for (const selector of groups) {
+    for (const root of getScopedRoots(document)) {
+      let elements = [];
+
+      try {
+        elements = [...root.querySelectorAll(selector)];
+      } catch (e) {
+        continue;
+      }
+
+      elements.forEach(element => {
+        const target = element;
+
+        if (!target || processedAltSweepElements.has(target) || !isElementClickable(target))
+          return;
+
+        candidates.push(target);
+      });
+    }
+
+    if (candidates.length > 0)
+      break;
+  }
+
+  return candidates;
+};
+
+const stopAltSweep = () => {
+  altSweepState.enabled = false;
+
+  if (altSweepState.timerId) {
+    clearTimeout(altSweepState.timerId);
+    altSweepState.timerId = null;
+  }
+};
+
+const runAltSweep = () => {
+  if (!altSweepState.enabled)
+    return;
+
+  const [candidate] = getAltSweepCandidates();
+
+  if (!candidate) {
+    handleAltNavigationAdvance();
+    return;
+  }
+
+  processedAltSweepElements.add(candidate);
+  clickElement(candidate);
+  altSweepState.timerId = setTimeout(runAltSweep, ALT_SWEEP_INTERVAL);
+};
+
+const toggleAltSweep = () => {
+  if (altSweepState.enabled) {
+    stopAltSweep();
+    return;
+  }
+
+  resetAltSweepTracking();
+  altSweepState.enabled = true;
+  runAltSweep();
+};
+
+const scheduleClicks = (elements, delay = AUTOMATION_CLICK_DELAY) => {
+  elements.forEach((element, index) => {
+    setTimeout(() => {
+      clickElement(element);
+    }, index * delay);
+  });
+};
+
+const finalizeVideoElement = video => {
+  if (!video || processedVideoElements.has(video) || pendingVideoElements.has(video))
+    return false;
+
+  const complete = () => {
+    if (processedVideoElements.has(video))
+      return;
+
+    try {
+      if (Number.isFinite(video.duration) && video.duration > 0) {
+        video.currentTime = Math.max(video.duration - 0.01, 0);
+      }
+    } catch (e) {
+    }
+
+    try {
+      video.pause();
+    } catch (e) {
+    }
+
+    ['timeupdate', 'seeking', 'seeked', 'ended', 'pause'].forEach(type => {
+      try {
+        video.dispatchEvent(new Event(type, {bubbles: true}));
+      } catch (e) {
+      }
+    });
+
+    pendingVideoElements.delete(video);
+    processedVideoElements.add(video);
+  };
+
+  if (Number.isFinite(video.duration) && video.duration > 0) {
+    complete();
+  } else {
+    pendingVideoElements.add(video);
+    ['loadedmetadata', 'loadeddata', 'durationchange', 'canplay'].forEach(type => {
+      video.addEventListener(type, complete, {once: true});
+    });
+    setTimeout(complete, 50);
+    setTimeout(complete, 400);
+  }
+
+  return true;
+};
+
+const finalizeVideosNear = trigger => {
+  const scope = trigger?.closest?.('.component, .component__widget, .block, article-view') || trigger || document;
+  let completed = false;
+
+  for (const root of getScopedRoots(scope)) {
+    let videos = [];
+
+    try {
+      videos = [...root.querySelectorAll('video')].filter(isElementVisible);
+    } catch (e) {
+      continue;
+    }
+
+    videos.forEach(video => {
+      if (finalizeVideoElement(video)) {
+        completed = true;
+      }
+    });
+  }
+
+  return completed;
+};
+
+const automateTabsFrom = trigger => {
+  const container = trigger?.closest?.(TABS_CONTAINER_SELECTORS);
+
+  if (!container || processedTabsContainers.has(container))
+    return false;
+
+  const buttons = getOrderedElements(container, TABS_SELECTORS)
+    .filter(button => button.getAttribute('aria-selected') !== 'true');
+
+  if (buttons.length === 0)
+    return false;
+
+  processedTabsContainers.add(container);
+  scheduleClicks(buttons);
+  return true;
+};
+
+const automateAccordionFrom = trigger => {
+  const container = trigger?.closest?.(ACCORDION_CONTAINER_SELECTORS);
+
+  if (!container || processedAccordionContainers.has(container))
+    return false;
+
+  const buttons = getOrderedElements(container, ACCORDION_SELECTORS)
+    .filter(button => button.getAttribute('aria-expanded') !== 'true');
+
+  if (buttons.length === 0)
+    return false;
+
+  processedAccordionContainers.add(container);
+  scheduleClicks(buttons);
+  return true;
+};
+
+const automateMatchingDropdownsFrom = trigger => {
+  const container = trigger?.closest?.(MATCHING_DROPDOWN_CONTAINER_SELECTORS);
+
+  if (!container || processedMatchingContainers.has(container))
+    return false;
+
+  const items = getOrderedElements(container, MATCHING_DROPDOWN_SELECTORS)
+    .map(getShadowClickable)
+    .filter(isElementClickable);
+
+  if (items.length === 0)
+    return false;
+
+  processedMatchingContainers.add(container);
+  scheduleClicks(items);
+  return true;
+};
+
+const scheduleNotifyClose = scope => {
+  notifyCloseState.requestId += 1;
+
+  if (notifyCloseState.timerId) {
+    clearTimeout(notifyCloseState.timerId);
+    notifyCloseState.timerId = null;
+  }
+
+  const requestId = notifyCloseState.requestId;
+  let attempts = 0;
+
+  const tryClose = () => {
+    if (requestId !== notifyCloseState.requestId)
+      return;
+
+    attempts += 1;
+
+    const button = findFirstClickable(scope, NOTIFY_CLOSE_SELECTORS)
+      || findButtonsByKeywords(scope, NOTIFY_CLOSE_SELECTORS, ['cerrar ventana emergente', 'cerrar', 'close']);
+
+    if (button && clickElement(button)) {
+      notifyCloseState.timerId = null;
+      return;
+    }
+
+    if (attempts < PAGETRACER_RETRY_LIMIT) {
+      notifyCloseState.timerId = setTimeout(tryClose, PAGETRACER_RETRY_DELAY);
+    } else {
+      notifyCloseState.timerId = null;
+    }
+  };
+
+  notifyCloseState.timerId = setTimeout(tryClose, PAGETRACER_RETRY_DELAY);
+};
+
+const schedulePageTracerClose = scope => {
+  pageTracerState.requestId += 1;
+
+  if (pageTracerState.timerId) {
+    clearTimeout(pageTracerState.timerId);
+    pageTracerState.timerId = null;
+  }
+
+  const requestId = pageTracerState.requestId;
+  let attempts = 0;
+
+  const tryClose = () => {
+    if (requestId !== pageTracerState.requestId)
+      return;
+
+    attempts += 1;
+    const button = findFirstClickable(scope, PAGE_TRACER_CLOSE_SELECTORS)
+      || findButtonsByKeywords(scope, PAGE_TRACER_CLOSE_SELECTORS, ['close', 'cerrar']);
+
+    if (button && clickElement(button)) {
+      pageTracerState.timerId = null;
+      return;
+    }
+
+    if (attempts < PAGETRACER_RETRY_LIMIT) {
+      pageTracerState.timerId = setTimeout(tryClose, PAGETRACER_RETRY_DELAY);
+    } else {
+      pageTracerState.timerId = null;
+    }
+  };
+
+  pageTracerState.timerId = setTimeout(tryClose, PAGETRACER_RETRY_DELAY);
+};
+
+const getSearchRoots = (root, roots = [], visited = new WeakSet()) => {
+  if (!root || visited.has(root))
+    return roots;
+  visited.add(root);
+  roots.push(root);
+
+  let elements = [];
+  try {
+    elements = [...root.querySelectorAll('*')];
+  } catch (e) {
+    return roots;
+  }
+
+  elements.forEach(element => {
+    if (element.shadowRoot) {
+      getSearchRoots(element.shadowRoot, roots, visited);
+    }
+
+    if (element.tagName === 'IFRAME') {
+      try {
+        if (element.contentDocument) {
+          getSearchRoots(element.contentDocument, roots, visited);
+        }
+      } catch (e) {
+      }
+    }
+  });
+
+  return roots;
+};
+
+const isAutoSubmitButton = element => {
+  if (!element || !isElementVisible(element))
+    return false;
+
+  const text = normalizeText(
+    element.textContent
+    || element.value
+    || element.getAttribute?.('aria-label')
+    || element.getAttribute?.('title')
+  );
+
+  return AUTO_SUBMIT_KEYWORDS.some(keyword => text.includes(keyword));
+};
+
+const findAutoSubmitButton = scope => findButtonsByKeywords(scope, AUTO_SUBMIT_SELECTORS, AUTO_SUBMIT_KEYWORDS);
+
+const clickAutoSubmitButton = button => {
+  if (!button)
+    return false;
+
+  const now = Date.now();
+
+  if (autoSubmitState.lastButton === button && now - autoSubmitState.lastClickAt < 250)
+    return true;
+
+  autoSubmitState.lastButton = button;
+  autoSubmitState.lastClickAt = now;
+  button.click();
+  return true;
+};
+
+const scheduleAutoSubmit = scope => {
+  autoSubmitState.requestId += 1;
+  autoSubmitState.scope = scope || document;
+
+  if (autoSubmitState.timerId) {
+    clearTimeout(autoSubmitState.timerId);
+    autoSubmitState.timerId = null;
+  }
+
+  const requestId = autoSubmitState.requestId;
+  let attempts = 0;
+
+  const trySubmit = () => {
+    if (requestId !== autoSubmitState.requestId)
+      return;
+
+    attempts += 1;
+    const button = findAutoSubmitButton(autoSubmitState.scope);
+
+    if (button && clickAutoSubmitButton(button)) {
+      scheduleNotifyClose(autoSubmitState.scope);
+      autoSubmitState.timerId = null;
+      return;
+    }
+
+    if (attempts < AUTO_SUBMIT_RETRY_LIMIT) {
+      autoSubmitState.timerId = setTimeout(trySubmit, AUTO_SUBMIT_RETRY_DELAY);
+    } else {
+      autoSubmitState.timerId = null;
+    }
+  };
+
+  autoSubmitState.timerId = setTimeout(trySubmit, AUTO_SUBMIT_RETRY_DELAY);
+};
+
+const initGlobalInteractionAutomations = () => {
+  const attachInteractionAutomation = rootDocument => {
+    if (!rootDocument || processedInteractionDocuments.has(rootDocument))
+      return;
+    processedInteractionDocuments.add(rootDocument);
+
+    rootDocument.addEventListener('click', event => {
+    if (!event.isTrusted)
+      return;
+
+    const videoTrigger = findVideoTrigger(event);
+    if (videoTrigger) {
+      finalizeVideosNear(videoTrigger);
+    }
+
+    const tabsTrigger = findPathElement(event, TABS_SELECTORS);
+    if (tabsTrigger) {
+      automateTabsFrom(tabsTrigger);
+    }
+
+    const pageTracerTrigger = findPathElement(event, PAGE_TRACER_SELECTORS);
+    if (pageTracerTrigger) {
+      schedulePageTracerClose(pageTracerTrigger);
+    }
+
+    const matchingTrigger = findMatchingTrigger(event);
+    if (matchingTrigger) {
+      automateMatchingDropdownsFrom(matchingTrigger);
+    }
+
+    const accordionTrigger = findPathElement(event, ACCORDION_SELECTORS);
+    if (accordionTrigger) {
+      automateAccordionFrom(accordionTrigger);
+    }
+    }, true);
+  };
+
+  if (!globalInteractionAutomationsInitialized) {
+    globalInteractionAutomationsInitialized = true;
+    attachInteractionAutomation(document);
+  }
+
+  for (const root of getScopedRoots(document)) {
+    if (root.nodeType === Node.DOCUMENT_NODE) {
+      attachInteractionAutomation(root);
+    }
+  }
+};
+
+const initGlobalKeyboardAutomations = () => {
+  const attachKeyboardAutomation = rootDocument => {
+    if (!rootDocument || processedKeyboardDocuments.has(rootDocument))
+      return;
+    processedKeyboardDocuments.add(rootDocument);
+
+    rootDocument.addEventListener('keydown', event => {
+      if (event.repeat || event.key !== 'Alt')
+        return;
+
+      event.preventDefault();
+      toggleAltSweep();
+    }, true);
+  };
+
+  if (!globalKeyboardAutomationsInitialized) {
+    globalKeyboardAutomationsInitialized = true;
+    attachKeyboardAutomation(document);
+  }
+
+  for (const root of getScopedRoots(document)) {
+    if (root.nodeType === Node.DOCUMENT_NODE) {
+      attachKeyboardAutomation(root);
+    }
+  }
+};
 
 browser.runtime.onMessage.addListener(async (request) => {
   if (request?.componentsUrl && typeof request.componentsUrl === 'string' && !componentUrls.includes(request.componentsUrl)) {
@@ -199,17 +891,19 @@ const initYeNoQuestions = question => {
   questionElement.parentElement?.addEventListener('click', e => {
     const questionElement = deepHtmlSearch(e.target, `.img_question`);
 
-    for (const item of question.items) {
-      if (questionElement.alt === item._graphic.alt) {
-        if (item._shouldBeSelected) {
-          const yesButton = deepHtmlSearch(question.questionDiv, `.user_selects_yes`);
-          yesButton.click();
-        } else {
-          const noButton = deepHtmlSearch(question.questionDiv, `.user_selects_no`);
-          noButton.click();
+        for (const item of question.items) {
+          if (questionElement.alt === item._graphic.alt) {
+            if (item._shouldBeSelected) {
+              const yesButton = deepHtmlSearch(question.questionDiv, `.user_selects_yes`);
+              yesButton.click();
+              scheduleAutoSubmit(question.questionDiv);
+            } else {
+              const noButton = deepHtmlSearch(question.questionDiv, `.user_selects_no`);
+              noButton.click();
+              scheduleAutoSubmit(question.questionDiv);
+            }
+          }
         }
-      }
-    }
   });
 
   const yesButton = deepHtmlSearch(question.questionDiv, `.user_selects_yes`);
@@ -219,14 +913,15 @@ const initYeNoQuestions = question => {
     if (e.ctrlKey) {
       const questionElement = deepHtmlSearch(question.questionDiv, `.img_question`);
 
-      if (questionElement) {
-        for (const item of question.items) {
-          if (item._graphic.alt === questionElement.alt) {
-            if (item._shouldBeSelected) {
-              yesButton.click();
-            }
-            break;
-          }
+          if (questionElement) {
+            for (const item of question.items) {
+              if (item._graphic.alt === questionElement.alt) {
+                if (item._shouldBeSelected) {
+                  yesButton.click();
+                  scheduleAutoSubmit(question.questionDiv);
+                }
+                break;
+              }
         }
       }
     }
@@ -236,14 +931,15 @@ const initYeNoQuestions = question => {
     if (e.ctrlKey) {
       const questionElement = deepHtmlSearch(question.questionDiv, `.img_question`);
 
-      if (questionElement) {
-        for (const item of question.items) {
-          if (item._graphic.alt === questionElement.alt) {
-            if (!item._shouldBeSelected) {
-              noButton.click();
-            }
-            break;
-          }
+          if (questionElement) {
+            for (const item of question.items) {
+              if (item._graphic.alt === questionElement.alt) {
+                if (!item._shouldBeSelected) {
+                  noButton.click();
+                  scheduleAutoSubmit(question.questionDiv);
+                }
+                break;
+              }
         }
       }
     }
@@ -269,6 +965,7 @@ const setOpenTextInputQuestions = question => {
               const input = deepHtmlSearch(question.questionDiv, `[data-target="${position}"]`);
               if (input) {
                 input?.click();
+                scheduleAutoSubmit(question.questionDiv);
               } else {
                 question.questionDiv.click();
               }
@@ -296,6 +993,7 @@ const setOpenTextInputQuestions = question => {
                 input.addEventListener('mouseover', e => {
                   if (e.ctrlKey) {
                     input.click();
+                    scheduleAutoSubmit(question.questionDiv);
                   }
                 });
               }
@@ -333,11 +1031,14 @@ const setFillBlanksQuestions = question => {
                   if (!e.target.textContent?.trim())
                     return;
                   dropdownItem.click();
+                  scheduleAutoSubmit(question.questionDiv);
                 });
 
                 dropdownItem.addEventListener('mouseover', e => {
-                  if (e.ctrlKey)
+                  if (e.ctrlKey) {
                     dropdownItem.click();
+                    scheduleAutoSubmit(question.questionDiv);
+                  }
                 });
                 break;
               }
@@ -370,11 +1071,13 @@ const setTableDropdownQuestions = question => {
       if (optionElement.textContent.trim() === correctOption.text.trim()) {
         section.addEventListener('click', () => {
           optionElement.click();
+          scheduleAutoSubmit(question.questionDiv);
         });
 
         optionElement.addEventListener('mouseover', e => {
           if (e.ctrlKey) {
             optionElement.click();
+            scheduleAutoSubmit(question.questionDiv);
           }
         });
         break;
@@ -405,13 +1108,16 @@ const initClickListeners = () => {
             setTimeout(() => label.click(), 10);
           }
         });
+        scheduleAutoSubmit(question.questionDiv);
       } else if (question.questionType === 'match') {
         question.inputs.forEach(input => {
           input[0].click();
           input[1].click();
         });
+        scheduleAutoSubmit(question.questionDiv);
       } else if (question.questionType === 'dropdownSelect') {
         question.inputs[0]?.click();
+        scheduleAutoSubmit(question.questionDiv);
       }
     });
   });
@@ -438,6 +1144,7 @@ const initHoverListeners = () => {
 
             if (component._items[i]._shouldBeSelected) {
               setTimeout(() => label.click(), 10);
+              scheduleAutoSubmit(question.questionDiv);
             }
           }
         });
@@ -452,6 +1159,7 @@ const initHoverListeners = () => {
           if (e.ctrlKey) {
             input[0].click();
             input[1].click();
+            scheduleAutoSubmit(question.questionDiv);
           }
         });
       });
@@ -465,6 +1173,7 @@ const initHoverListeners = () => {
       optionEl.addEventListener('mouseover', e => {
         if (e.ctrlKey) {
           optionEl.click();
+          scheduleAutoSubmit(question.questionDiv);
         }
       });
     }
@@ -485,6 +1194,8 @@ const setIsReady = () => {
 };
 
 const main = async () => {
+  initGlobalInteractionAutomations();
+  initGlobalKeyboardAutomations();
   questions = [];
   await setQuestionSections();
   setQuestionElements();
@@ -510,7 +1221,12 @@ const suspendMain = () => {
 };
 
 if (window) {
+  initGlobalInteractionAutomations();
+  initGlobalKeyboardAutomations();
   setInterval(() => {
+    initGlobalInteractionAutomations();
+    initGlobalKeyboardAutomations();
+
     if (isSuspendRunning || components.length === 0)
       return;
 

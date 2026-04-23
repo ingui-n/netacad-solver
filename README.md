@@ -48,6 +48,12 @@ Browser extension allowing you to pass all the NetAcad quizzes
 2. Use one of following options:
 - Click on quiz question and the right option(s) should be selected automatically
 - Hover over the answers while holding the `Ctrl` button and the right option(s) should select automatically
+- After the correct answer is selected, the extension also tries to submit the question automatically
+- Clicking course videos jumps them to the end to mark them as completed faster
+- Clicking a tabset/accordion starts traversing the remaining items automatically without repeating finished groups
+- Clicking a page tracer resource opens it and then closes the popup automatically
+- Submit popups/notify dialogs are closed automatically when NetAcad shows a close button
+- Pressing `Alt` toggles a full navigation mode for non-evaluative course content: it scrolls through videos/tabs/accordions/resources, closes popups, and advances page-by-page with next/outline navigation
 
 ![demo.gif](assets/videos/demo.gif)
 ![demo-hover.gif](assets/videos/demo-hover.gif)
