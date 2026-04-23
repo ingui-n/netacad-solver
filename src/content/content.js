@@ -5,6 +5,8 @@ let isSuspendRunning = false;
 const components = [];
 let questions = [];
 const componentUrls = [];
+const AUTO_SUBMIT_KEYWORDS = ['submit', 'enviar', 'check', 'check answer'];
+const AUTO_SUBMIT_SELECTORS = 'button, [role="button"], input[type="button"], input[type="submit"], .js-btn-action, .btn__action';
 
 const processedQuestionElements = new WeakSet();
 const processedLabels = new WeakSet();
@@ -17,6 +19,152 @@ const processedTableRows = new WeakSet();
 const processedOpenTextButtons = new WeakSet();
 const processedTableOptions = new WeakSet();
 const processedFillBlankOptions = new WeakSet();
+const autoSubmitState = {
+  requestId: 0,
+  frameId: null,
+  lastButton: null,
+  lastClickAt: 0
+};
+
+const normalizeText = value => value?.replace(/\s+/g, ' ').trim().toLowerCase() || '';
+
+const isElementVisible = element => {
+  if (!element)
+    return false;
+
+  if (element.offsetParent || element.getClientRects?.().length)
+    return true;
+
+  const style = window.getComputedStyle?.(element);
+  return style?.visibility !== 'hidden' && style?.display !== 'none';
+};
+
+const isElementDisabled = element => {
+  if (!element)
+    return true;
+
+  return Boolean(
+    element.disabled
+    || element.ariaDisabled === 'true'
+    || element.getAttribute?.('aria-disabled') === 'true'
+    || element.classList?.contains('is-disabled')
+    || element.classList?.contains('disabled')
+  );
+};
+
+const getSearchRoots = (root, roots = [], visited = new WeakSet()) => {
+  if (!root || visited.has(root))
+    return roots;
+  visited.add(root);
+  roots.push(root);
+
+  let elements = [];
+  try {
+    elements = [...root.querySelectorAll('*')];
+  } catch (e) {
+    return roots;
+  }
+
+  elements.forEach(element => {
+    if (element.shadowRoot) {
+      getSearchRoots(element.shadowRoot, roots, visited);
+    }
+
+    if (element.tagName === 'IFRAME') {
+      try {
+        if (element.contentDocument) {
+          getSearchRoots(element.contentDocument, roots, visited);
+        }
+      } catch (e) {
+      }
+    }
+  });
+
+  return roots;
+};
+
+const isAutoSubmitButton = element => {
+  if (!element || !isElementVisible(element))
+    return false;
+
+  const text = normalizeText(
+    element.textContent
+    || element.value
+    || element.getAttribute?.('aria-label')
+    || element.getAttribute?.('title')
+  );
+
+  return AUTO_SUBMIT_KEYWORDS.some(keyword => text.includes(keyword));
+};
+
+const findAutoSubmitButton = () => {
+  const roots = getSearchRoots(document);
+
+  for (const root of roots) {
+    let buttons = [];
+
+    try {
+      buttons = [...root.querySelectorAll(AUTO_SUBMIT_SELECTORS)];
+    } catch (e) {
+      continue;
+    }
+
+    const match = buttons.find(button => isAutoSubmitButton(button) && !isElementDisabled(button));
+
+    if (match)
+      return match;
+  }
+
+  return null;
+};
+
+const clickAutoSubmitButton = button => {
+  if (!button)
+    return false;
+
+  const now = Date.now();
+
+  if (autoSubmitState.lastButton === button && now - autoSubmitState.lastClickAt < 250)
+    return true;
+
+  autoSubmitState.lastButton = button;
+  autoSubmitState.lastClickAt = now;
+  button.click();
+  return true;
+};
+
+const scheduleAutoSubmit = () => {
+  autoSubmitState.requestId += 1;
+
+  if (autoSubmitState.frameId) {
+    cancelAnimationFrame(autoSubmitState.frameId);
+    autoSubmitState.frameId = null;
+  }
+
+  const requestId = autoSubmitState.requestId;
+  let attempts = 0;
+
+  const trySubmit = () => {
+    if (requestId !== autoSubmitState.requestId)
+      return;
+
+    attempts += 1;
+    const button = findAutoSubmitButton();
+
+    if (button && clickAutoSubmitButton(button)) {
+      autoSubmitState.frameId = null;
+      return;
+    }
+
+    if (attempts < 60) {
+      autoSubmitState.frameId = requestAnimationFrame(trySubmit);
+    } else {
+      autoSubmitState.frameId = null;
+    }
+  };
+
+  autoSubmitState.frameId = requestAnimationFrame(trySubmit);
+};
 
 browser.runtime.onMessage.addListener(async (request) => {
   if (request?.componentsUrl && typeof request.componentsUrl === 'string' && !componentUrls.includes(request.componentsUrl)) {
@@ -199,17 +347,19 @@ const initYeNoQuestions = question => {
   questionElement.parentElement?.addEventListener('click', e => {
     const questionElement = deepHtmlSearch(e.target, `.img_question`);
 
-    for (const item of question.items) {
-      if (questionElement.alt === item._graphic.alt) {
-        if (item._shouldBeSelected) {
-          const yesButton = deepHtmlSearch(question.questionDiv, `.user_selects_yes`);
-          yesButton.click();
-        } else {
-          const noButton = deepHtmlSearch(question.questionDiv, `.user_selects_no`);
-          noButton.click();
+        for (const item of question.items) {
+          if (questionElement.alt === item._graphic.alt) {
+            if (item._shouldBeSelected) {
+              const yesButton = deepHtmlSearch(question.questionDiv, `.user_selects_yes`);
+              yesButton.click();
+              scheduleAutoSubmit();
+            } else {
+              const noButton = deepHtmlSearch(question.questionDiv, `.user_selects_no`);
+              noButton.click();
+              scheduleAutoSubmit();
+            }
+          }
         }
-      }
-    }
   });
 
   const yesButton = deepHtmlSearch(question.questionDiv, `.user_selects_yes`);
@@ -219,14 +369,15 @@ const initYeNoQuestions = question => {
     if (e.ctrlKey) {
       const questionElement = deepHtmlSearch(question.questionDiv, `.img_question`);
 
-      if (questionElement) {
-        for (const item of question.items) {
-          if (item._graphic.alt === questionElement.alt) {
-            if (item._shouldBeSelected) {
-              yesButton.click();
-            }
-            break;
-          }
+          if (questionElement) {
+            for (const item of question.items) {
+              if (item._graphic.alt === questionElement.alt) {
+                if (item._shouldBeSelected) {
+                  yesButton.click();
+                  scheduleAutoSubmit();
+                }
+                break;
+              }
         }
       }
     }
@@ -236,14 +387,15 @@ const initYeNoQuestions = question => {
     if (e.ctrlKey) {
       const questionElement = deepHtmlSearch(question.questionDiv, `.img_question`);
 
-      if (questionElement) {
-        for (const item of question.items) {
-          if (item._graphic.alt === questionElement.alt) {
-            if (!item._shouldBeSelected) {
-              noButton.click();
-            }
-            break;
-          }
+          if (questionElement) {
+            for (const item of question.items) {
+              if (item._graphic.alt === questionElement.alt) {
+                if (!item._shouldBeSelected) {
+                  noButton.click();
+                  scheduleAutoSubmit();
+                }
+                break;
+              }
         }
       }
     }
@@ -269,6 +421,7 @@ const setOpenTextInputQuestions = question => {
               const input = deepHtmlSearch(question.questionDiv, `[data-target="${position}"]`);
               if (input) {
                 input?.click();
+                scheduleAutoSubmit();
               } else {
                 question.questionDiv.click();
               }
@@ -296,6 +449,7 @@ const setOpenTextInputQuestions = question => {
                 input.addEventListener('mouseover', e => {
                   if (e.ctrlKey) {
                     input.click();
+                    scheduleAutoSubmit();
                   }
                 });
               }
@@ -333,11 +487,14 @@ const setFillBlanksQuestions = question => {
                   if (!e.target.textContent?.trim())
                     return;
                   dropdownItem.click();
+                  scheduleAutoSubmit();
                 });
 
                 dropdownItem.addEventListener('mouseover', e => {
-                  if (e.ctrlKey)
+                  if (e.ctrlKey) {
                     dropdownItem.click();
+                    scheduleAutoSubmit();
+                  }
                 });
                 break;
               }
@@ -370,11 +527,13 @@ const setTableDropdownQuestions = question => {
       if (optionElement.textContent.trim() === correctOption.text.trim()) {
         section.addEventListener('click', () => {
           optionElement.click();
+          scheduleAutoSubmit();
         });
 
         optionElement.addEventListener('mouseover', e => {
           if (e.ctrlKey) {
             optionElement.click();
+            scheduleAutoSubmit();
           }
         });
         break;
@@ -405,13 +564,16 @@ const initClickListeners = () => {
             setTimeout(() => label.click(), 10);
           }
         });
+        scheduleAutoSubmit();
       } else if (question.questionType === 'match') {
         question.inputs.forEach(input => {
           input[0].click();
           input[1].click();
         });
+        scheduleAutoSubmit();
       } else if (question.questionType === 'dropdownSelect') {
         question.inputs[0]?.click();
+        scheduleAutoSubmit();
       }
     });
   });
@@ -438,6 +600,7 @@ const initHoverListeners = () => {
 
             if (component._items[i]._shouldBeSelected) {
               setTimeout(() => label.click(), 10);
+              scheduleAutoSubmit();
             }
           }
         });
@@ -452,6 +615,7 @@ const initHoverListeners = () => {
           if (e.ctrlKey) {
             input[0].click();
             input[1].click();
+            scheduleAutoSubmit();
           }
         });
       });
@@ -465,6 +629,7 @@ const initHoverListeners = () => {
       optionEl.addEventListener('mouseover', e => {
         if (e.ctrlKey) {
           optionEl.click();
+          scheduleAutoSubmit();
         }
       });
     }
