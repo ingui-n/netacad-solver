@@ -17,6 +17,12 @@ const VIDEO_SELECTORS = 'video, .vjs-tech, iframe[src*="brightcovePlayer"]';
 const VIDEO_CONTAINER_SELECTORS = '.component__widget, .video__widget, .component, block-view, article-view';
 const PAGE_TRACER_SELECTORS = '.pageTracer-button, [data-page-tracer-button-id], pagetracer-view button.btn__action';
 const PAGE_TRACER_CLOSE_SELECTORS = '#close-btn, .close-button';
+const NOTIFY_CLOSE_SELECTORS = '.js-notify-close-btn, .notify__close-btn';
+const MATCHING_DROPDOWN_SELECTORS = 'matching-dropdown-view, .matching__item_main';
+const MATCHING_DROPDOWN_CONTAINER_SELECTORS = '.matching__widget, matching-view';
+const OBJECT_MATCHING_SELECTORS = '.objectMatching-category-item, .objectMatching-option-item';
+const OBJECT_MATCHING_CONTAINER_SELECTORS = '.objectMatching__widget, object-matching-view';
+const ALT_SWEEP_INTERVAL = 18;
 const AUTOMATION_CLICK_DELAY = 140;
 const PAGETRACER_RETRY_DELAY = 120;
 const PAGETRACER_RETRY_LIMIT = 10;
@@ -37,6 +43,9 @@ const processedAccordionContainers = new WeakSet();
 const processedVideoElements = new WeakSet();
 const pendingVideoElements = new WeakSet();
 const processedInteractionDocuments = new WeakSet();
+const processedMatchingContainers = new WeakSet();
+const processedKeyboardDocuments = new WeakSet();
+const processedAltSweepElements = new WeakSet();
 const autoSubmitState = {
   requestId: 0,
   timerId: null,
@@ -48,8 +57,17 @@ const pageTracerState = {
   requestId: 0,
   timerId: null
 };
+const notifyCloseState = {
+  requestId: 0,
+  timerId: null
+};
+const altSweepState = {
+  enabled: false,
+  timerId: null
+};
 
 let globalInteractionAutomationsInitialized = false;
+let globalKeyboardAutomationsInitialized = false;
 
 const normalizeText = value => value?.replace(/\s+/g, ' ').trim().toLowerCase() || '';
 
@@ -82,6 +100,11 @@ const isElementClickable = element => isElementVisible(element) && !isElementDis
 const clickElement = element => {
   if (!element || !isElementClickable(element))
     return false;
+
+  try {
+    element.scrollIntoView({block: 'center', inline: 'center'});
+  } catch (e) {
+  }
 
   element.click();
   return true;
@@ -132,6 +155,18 @@ const findVideoTrigger = event => {
       return false;
     }
   }) || null;
+};
+
+const findMatchingTrigger = event => findPathElement(event, MATCHING_DROPDOWN_SELECTORS)
+  || findClosestPathElement(event, MATCHING_DROPDOWN_CONTAINER_SELECTORS);
+
+const getShadowClickable = host => {
+  const shadowRoot = host?.shadowRoot;
+
+  if (!shadowRoot)
+    return host;
+
+  return shadowRoot.querySelector('button, [role="button"], .btn__action, .dropdown__btn, .dropdown__selected, .matching__item_main') || host;
 };
 
 const getScopedRoots = scope => {
@@ -189,6 +224,82 @@ const findButtonsByKeywords = (scope, selectors, keywords) => {
 const getOrderedElements = (container, selector) => [...container.querySelectorAll(selector)]
   .filter(isElementVisible)
   .sort((a, b) => Number(a.dataset.index || 0) - Number(b.dataset.index || 0));
+
+const getAltSweepCandidates = () => {
+  const groups = [
+    '.mcq__item-label.js-item-label:not(.is-disabled):not(.is-selected)',
+    '.mcq__item.js-mcq-item:not(.is-disabled):not(.is-correct):not(.is-incorrect)',
+    '.objectMatching-category-item:not(.is-disabled), .objectMatching-option-item:not(.is-disabled)',
+    'matching-dropdown-view, .matching__item_main',
+    '.accordion__item-btn[aria-expanded="false"]',
+    '.tabs__nav-item-btn[aria-selected="false"], .js-tabs-nav-item-btn-click[aria-selected="false"], [role="tab"][aria-selected="false"]',
+    '.pageTracer-button, [data-page-tracer-button-id]',
+    'button[type="submit"], input[type="submit"], .js-btn-action, .btn__action'
+  ];
+
+  const candidates = [];
+
+  for (const selector of groups) {
+    for (const root of getScopedRoots(document)) {
+      let elements = [];
+
+      try {
+        elements = [...root.querySelectorAll(selector)];
+      } catch (e) {
+        continue;
+      }
+
+      elements.forEach(element => {
+        const target = element.matches?.(MATCHING_DROPDOWN_SELECTORS) ? getShadowClickable(element) : element;
+
+        if (!target || processedAltSweepElements.has(target) || !isElementClickable(target))
+          return;
+
+        candidates.push(target);
+      });
+    }
+
+    if (candidates.length > 0)
+      break;
+  }
+
+  return candidates;
+};
+
+const stopAltSweep = () => {
+  altSweepState.enabled = false;
+
+  if (altSweepState.timerId) {
+    clearTimeout(altSweepState.timerId);
+    altSweepState.timerId = null;
+  }
+};
+
+const runAltSweep = () => {
+  if (!altSweepState.enabled)
+    return;
+
+  const [candidate] = getAltSweepCandidates();
+
+  if (!candidate) {
+    stopAltSweep();
+    return;
+  }
+
+  processedAltSweepElements.add(candidate);
+  clickElement(candidate);
+  altSweepState.timerId = setTimeout(runAltSweep, ALT_SWEEP_INTERVAL);
+};
+
+const toggleAltSweep = () => {
+  if (altSweepState.enabled) {
+    stopAltSweep();
+    return;
+  }
+
+  altSweepState.enabled = true;
+  runAltSweep();
+};
 
 const scheduleClicks = (elements, delay = AUTOMATION_CLICK_DELAY) => {
   elements.forEach((element, index) => {
@@ -298,6 +409,59 @@ const automateAccordionFrom = trigger => {
   processedAccordionContainers.add(container);
   scheduleClicks(buttons);
   return true;
+};
+
+const automateMatchingDropdownsFrom = trigger => {
+  const container = trigger?.closest?.(MATCHING_DROPDOWN_CONTAINER_SELECTORS);
+
+  if (!container || processedMatchingContainers.has(container))
+    return false;
+
+  const items = getOrderedElements(container, MATCHING_DROPDOWN_SELECTORS)
+    .map(getShadowClickable)
+    .filter(isElementClickable);
+
+  if (items.length === 0)
+    return false;
+
+  processedMatchingContainers.add(container);
+  scheduleClicks(items);
+  return true;
+};
+
+const scheduleNotifyClose = scope => {
+  notifyCloseState.requestId += 1;
+
+  if (notifyCloseState.timerId) {
+    clearTimeout(notifyCloseState.timerId);
+    notifyCloseState.timerId = null;
+  }
+
+  const requestId = notifyCloseState.requestId;
+  let attempts = 0;
+
+  const tryClose = () => {
+    if (requestId !== notifyCloseState.requestId)
+      return;
+
+    attempts += 1;
+
+    const button = findFirstClickable(scope, NOTIFY_CLOSE_SELECTORS)
+      || findButtonsByKeywords(scope, NOTIFY_CLOSE_SELECTORS, ['cerrar ventana emergente', 'cerrar', 'close']);
+
+    if (button && clickElement(button)) {
+      notifyCloseState.timerId = null;
+      return;
+    }
+
+    if (attempts < PAGETRACER_RETRY_LIMIT) {
+      notifyCloseState.timerId = setTimeout(tryClose, PAGETRACER_RETRY_DELAY);
+    } else {
+      notifyCloseState.timerId = null;
+    }
+  };
+
+  notifyCloseState.timerId = setTimeout(tryClose, PAGETRACER_RETRY_DELAY);
 };
 
 const schedulePageTracerClose = scope => {
@@ -416,6 +580,7 @@ const scheduleAutoSubmit = scope => {
     const button = findAutoSubmitButton(autoSubmitState.scope);
 
     if (button && clickAutoSubmitButton(button)) {
+      scheduleNotifyClose(autoSubmitState.scope);
       autoSubmitState.timerId = null;
       return;
     }
@@ -455,6 +620,11 @@ const initGlobalInteractionAutomations = () => {
       schedulePageTracerClose(pageTracerTrigger);
     }
 
+    const matchingTrigger = findMatchingTrigger(event);
+    if (matchingTrigger) {
+      automateMatchingDropdownsFrom(matchingTrigger);
+    }
+
     const accordionTrigger = findPathElement(event, ACCORDION_SELECTORS);
     if (accordionTrigger) {
       automateAccordionFrom(accordionTrigger);
@@ -470,6 +640,33 @@ const initGlobalInteractionAutomations = () => {
   for (const root of getScopedRoots(document)) {
     if (root.nodeType === Node.DOCUMENT_NODE) {
       attachInteractionAutomation(root);
+    }
+  }
+};
+
+const initGlobalKeyboardAutomations = () => {
+  const attachKeyboardAutomation = rootDocument => {
+    if (!rootDocument || processedKeyboardDocuments.has(rootDocument))
+      return;
+    processedKeyboardDocuments.add(rootDocument);
+
+    rootDocument.addEventListener('keydown', event => {
+      if (event.repeat || event.key !== 'Alt')
+        return;
+
+      event.preventDefault();
+      toggleAltSweep();
+    }, true);
+  };
+
+  if (!globalKeyboardAutomationsInitialized) {
+    globalKeyboardAutomationsInitialized = true;
+    attachKeyboardAutomation(document);
+  }
+
+  for (const root of getScopedRoots(document)) {
+    if (root.nodeType === Node.DOCUMENT_NODE) {
+      attachKeyboardAutomation(root);
     }
   }
 };
@@ -959,6 +1156,7 @@ const setIsReady = () => {
 
 const main = async () => {
   initGlobalInteractionAutomations();
+  initGlobalKeyboardAutomations();
   questions = [];
   await setQuestionSections();
   setQuestionElements();
@@ -985,8 +1183,10 @@ const suspendMain = () => {
 
 if (window) {
   initGlobalInteractionAutomations();
+  initGlobalKeyboardAutomations();
   setInterval(() => {
     initGlobalInteractionAutomations();
+    initGlobalKeyboardAutomations();
 
     if (isSuspendRunning || components.length === 0)
       return;
