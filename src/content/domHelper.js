@@ -101,3 +101,42 @@ export const unwrapElementContent = element => {
   }
   return element;
 };
+
+export const enableTextSelectionRecursive = (doc = document) => {
+  if (!doc) return;
+
+  // block selection-clearing events (but allow clicks)
+  const stopPropHandler = (e) => e.stopImmediatePropagation();
+
+  doc.addEventListener?.('selectstart', stopPropHandler, true);
+  doc.addEventListener?.('contextmenu', stopPropHandler, true);
+  doc.addEventListener?.('mousedown', stopPropHandler, true);
+  doc.addEventListener?.('mouseup', stopPropHandler, true);
+  doc.addEventListener?.('mousemove', stopPropHandler, true);
+  doc.addEventListener?.('blur', stopPropHandler, true);
+  doc.addEventListener?.('focus', stopPropHandler, true);
+  doc.addEventListener?.('selectionchange', stopPropHandler, true);
+
+  // enables copy and paste functionality
+  doc.addEventListener?.('copy', stopPropHandler, true);
+  doc.addEventListener?.('cut', stopPropHandler, true);
+  doc.addEventListener?.('paste', stopPropHandler, true);
+
+  // recurse into iframes and shadow roots
+  const iframes = doc.querySelectorAll?.('iframe');
+
+  iframes.forEach(iframe => {
+    try {
+      if (iframe.contentDocument)
+        enableTextSelectionRecursive(iframe.contentDocument);
+    } catch (e) {}
+  });
+
+  const shadowRoots = [...(doc.querySelectorAll?.('*') || [])].filter(el => el.shadowRoot);
+
+  shadowRoots.forEach(el => {
+    try {
+      enableTextSelectionRecursive(el.shadowRoot);
+    } catch (e) {}
+  });
+};

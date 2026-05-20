@@ -1,5 +1,5 @@
 import browser from 'webextension-polyfill';
-import {deepHtmlSearch, deepHtmlFindByTextContent} from "./domHelper";
+import {deepHtmlSearch, deepHtmlFindByTextContent, enableTextSelectionRecursive} from "./domHelper";
 
 let isSuspendRunning = false;
 const components = [];
@@ -490,6 +490,7 @@ const main = async () => {
   setQuestionElements();
   initClickListeners();
   initHoverListeners();
+  enableTextSelectionRecursive();
 };
 
 const suspendMain = () => {
