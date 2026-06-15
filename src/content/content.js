@@ -1,5 +1,11 @@
 import browser from 'webextension-polyfill';
-import {deepHtmlSearch, deepHtmlFindByTextContent, enableTextSelectionRecursive} from "./domHelper";
+import {
+  deepHtmlSearch,
+  deepHtmlFindByTextContent,
+  enableTextSelectionRecursive,
+  deepHtmlFindByTextContentPart, findVisibleFromComponents, findVisibleQuestionPartsFromComponents,
+  disableAnimationsDeep
+} from "./domHelper";
 
 let isSuspendRunning = false;
 const components = [];
@@ -24,15 +30,31 @@ browser.runtime.onMessage.addListener(async (request) => {
     await setComponents(request.componentsUrl);
     suspendMain();
   }
+
+  if (request?.componentUrls && typeof request.componentUrls === 'object') {
+    let isNew = false;
+
+    for (const componentUrl of request.componentUrls) {
+      if (!componentUrls.includes(componentUrl)) {
+        isNew = true;
+        componentUrls.push(componentUrl);
+        await setComponents(componentUrl);
+      }
+    }
+
+    if (isNew) {
+      suspendMain();
+    }
+  }
 });
 
-const setComponents = async url => {
-  const getTextContentOfText = htmlString => {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(htmlString, 'text/html');
-    return doc.body.textContent;
-  };
+const getTextContentOfText = htmlString => {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(htmlString, 'text/html');
+  return doc.body.textContent;
+};
 
+const setComponents = async url => {
   try {
     const res = await fetch(url);
 
@@ -42,6 +64,7 @@ const setComponents = async url => {
     let json = await res.json();
     json = json
       .filter(component => component._items)
+      .filter(component => component.body)
       .filter(component => !components.map(c => c._id).includes(component._id))
       .map(component => {
         component.body = getTextContentOfText(component.body);
@@ -57,10 +80,15 @@ const setComponents = async url => {
 const setQuestionSections = async () => {
   let isAtLeaseOneSet = false;
 
-  for (const component of components) {
-    const questionDiv = deepHtmlSearch(document, `.${CSS.escape(component._id)}`);
+  const foundFromComponents = await findVisibleQuestionPartsFromComponents(document, components);
 
-    if (questionDiv) {
+  for (const component of components) {
+    const data = foundFromComponents[component._id];
+
+    const questionDiv = data?.questionDiv;
+    const questionElement = data?.questionElement;
+
+    if (questionElement) {
       isAtLeaseOneSet = true;
       let questionType = 'basic';
 
@@ -80,6 +108,7 @@ const setQuestionSections = async () => {
 
       questions.push({
         questionDiv,
+        questionElement,
         id: component._id,
         answersLength: component._items.length,
         questionType,
@@ -88,33 +117,25 @@ const setQuestionSections = async () => {
     }
   }
 
-  if (!isAtLeaseOneSet) {
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    return await setQuestionSections();
-  }
+  return isAtLeaseOneSet;
 };
 
-const findQuestionElement = document => {
-  for (const component of components) {
-    const questionElement = deepHtmlFindByTextContent(document, component.body);
+const findAnswerInputsBasic = (question) => {
+  const inputs = [];
 
-    if (questionElement) {
-      return questionElement;
-    }
-  }
-};
+  for (let i = 0; i < question.answersLength; i++) {
+    const div = deepHtmlFindByTextContentPart(question.questionDiv, question.items[i].text);
+    const input = deepHtmlSearch(question.questionDiv, `#${CSS.escape(question.id)}-${i}-input`);
+    const label = deepHtmlSearch(question.questionDiv, `#${CSS.escape(question.id)}-${i}-label`);
 
-const findAnswerInputsBasic = (document, questionId, answersLength, inputs = []) => {
-  for (let i = 0; i < answersLength; i++) {
-    const input = deepHtmlSearch(document, `#${CSS.escape(questionId)}-${i}-input`);
-    const label = deepHtmlSearch(document, `#${CSS.escape(questionId)}-${i}-label`);
+    inputs.push({
+      input: input,
+      label: label,
+      div: div
+    });
 
-    if (input) {
-      inputs.push({input, label});
-
-      if (inputs.length === answersLength) {
-        return inputs;
-      }
+    if (inputs.length === question.answersLength) {
+      return inputs;
     }
   }
 };
@@ -136,10 +157,14 @@ const findAnswerInputsMatch = (document, answersLength, buttons = []) => {
 const setQuestionElements = () => {
   questions.map(question => {
     if (question.questionType === 'basic') {
-      question.questionElement = findQuestionElement(question.questionDiv);
-      question.inputs = findAnswerInputsBasic(question.questionDiv, question.id, question.answersLength) || [];
+      if (!question.items[0].text || question.items.length !== question.answersLength) {
+        question.skip = true;
+        return;
+      }
+
+      question.items = question.items.map(item => ({...item, text: getTextContentOfText(item.text.trim())}));
+      question.inputs = findAnswerInputsBasic(question) || [];
     } else if (question.questionType === 'match') {
-      question.questionElement = findQuestionElement(question.questionDiv);
       question.inputs = findAnswerInputsMatch(question.questionDiv, question.answersLength) || [];
     } else if (question.questionType === 'dropdownSelect') {
       setDropdownSelectQuestions(question);
@@ -251,22 +276,38 @@ const initYeNoQuestions = question => {
 };
 
 const setOpenTextInputQuestions = question => {
-  question.items.forEach((item, i) => {
-    const questionElement = deepHtmlSearch(question.questionDiv, '#' + CSS.escape(`${question.id}-option-${i}`));
+  question.items.forEach(async (item, i) => {
+    await disableAnimationsDeep(question.questionDiv);
+
+    let currentAnswerElement = deepHtmlSearch(question.questionDiv, '#' + CSS.escape(`${question.id}-option-${i}`));
+
+    if (!currentAnswerElement) {
+      currentAnswerElement = deepHtmlSearch(question.questionDiv, `#item-${i}`);
+    }
+
     const button = deepHtmlSearch(question.questionDiv, `.current-item-${i}`, true);
 
-    if (questionElement && !processedOpenTextQuestions.has(questionElement)) {
-      processedOpenTextQuestions.add(questionElement);
+    if (currentAnswerElement && !processedOpenTextQuestions.has(currentAnswerElement)) {
+      processedOpenTextQuestions.add(currentAnswerElement);
 
-      questionElement.addEventListener('click', () => {
+      currentAnswerElement.addEventListener('click', () => {
         setTimeout(() => {
           button.click();
-          const currentQuestion = questionElement.textContent?.trim();
-          const position = question.items.find(item => item._options.text.trim() === currentQuestion)?.position?.[0];
 
-          if (position) {
+          let currentQuestion, rightPosition;
+
+          for (const item of question.items) {
+            currentQuestion = deepHtmlFindByTextContentPart(currentAnswerElement, item._options.text.trim());
+            rightPosition = item.position[0];
+
+            if (!!currentQuestion) {
+              break;
+            }
+          }
+
+          if (rightPosition) {
             setTimeout(() => {
-              const input = deepHtmlSearch(question.questionDiv, `[data-target="${position}"]`);
+              const input = deepHtmlSearch(question.questionDiv, `[data-target="${rightPosition}"]`);
               if (input) {
                 input?.click();
               } else {
@@ -278,17 +319,26 @@ const setOpenTextInputQuestions = question => {
       });
     }
 
+    // not sure if this part even do something anymore
     if (button && !processedOpenTextButtons.has(button)) {
       processedOpenTextButtons.add(button);
 
       button.addEventListener('click', () => {
         setTimeout(() => {
-          const currentQuestion = questionElement?.textContent?.trim();
-          const position = question.items.find(item => item._options.text.trim() === currentQuestion)?.position?.[0];
+          let currentQuestion, rightPosition;
 
-          if (position) {
+          for (const item of question.items) {
+            currentQuestion = deepHtmlFindByTextContentPart(currentAnswerElement, item._options.text.trim());
+            rightPosition = item.position[0];
+
+            if (!!currentQuestion) {
+              break;
+            }
+          }
+
+          if (rightPosition) {
             setTimeout(() => {
-              const input = deepHtmlSearch(question.questionDiv, `[data-target="${position}"]`);
+              const input = deepHtmlSearch(question.questionDiv, `[data-target="${rightPosition}"]`);
 
               if (input && !input.dataset.hoverListenerAdded) {
                 input.dataset.hoverListenerAdded = 'true';
@@ -385,7 +435,7 @@ const setTableDropdownQuestions = question => {
 
 const initClickListeners = () => {
   questions.forEach((question) => {
-    if (question.skip || !question.questionElement)
+    if (question.skip || !question.questionElement || !question.inputs)
       return;
 
     if (processedQuestionElements.has(question.questionElement))
@@ -396,13 +446,19 @@ const initClickListeners = () => {
       if (question.questionType === 'basic') {
         const component = components.find(c => c._id === question.id);
 
-        question.inputs.forEach(({input, label}, i) => {
+        question.inputs.forEach(({input, label, div}, i) => {
+          if (!input || !label) {
+            label = [...div.querySelectorAll('label')].find(el => el.textContent.includes(component._items[i].text));
+            const inputId = label.getAttribute('for');
+            input = div.querySelector(`[id="${inputId}"]`);
+          }
+
           if (input.checked) {
             label.click();
           }
 
           if (component._items[i]._shouldBeSelected) {
-            setTimeout(() => label.click(), 10);
+            setTimeout(() => label.click(), 50);
           }
         });
       } else if (question.questionType === 'match') {
@@ -419,25 +475,31 @@ const initClickListeners = () => {
 
 const initHoverListeners = () => {
   questions.forEach((question) => {
-    if (question.skip)
+    if (question.skip || !question.inputs)
       return;
 
     const component = components.find(c => c._id === question.id);
 
     if (question.questionType === 'basic') {
-      question.inputs.forEach(({input, label}, i) => {
+      question.inputs.forEach(({input, label, div}, i) => {
+        if (!input || !label) {
+          label = [...div.querySelectorAll('label')].find(el => el.textContent.includes(component._items[i].text));
+          const inputId = label.getAttribute('for');
+          input = div.querySelector(`[id="${inputId}"]`);
+        }
+
         if (!label || processedLabels.has(label))
           return;
         processedLabels.add(label);
 
-        label.addEventListener('mouseover', e => {
+        label.addEventListener('mouseenter', e => {
           if (e.ctrlKey) {
             if (input.checked) {
               label.click();
             }
 
             if (component._items[i]._shouldBeSelected) {
-              setTimeout(() => label.click(), 10);
+              setTimeout(() => label.click(), 50);
             }
           }
         });
@@ -448,7 +510,7 @@ const initHoverListeners = () => {
           return;
         processedMatchPairs.add(input[0]);
 
-        input[0].addEventListener('mouseover', e => {
+        input[0].addEventListener('mouseenter', e => {
           if (e.ctrlKey) {
             input[0].click();
             input[1].click();
@@ -462,7 +524,7 @@ const initHoverListeners = () => {
         return;
       processedDropdownOptions.add(optionEl);
 
-      optionEl.addEventListener('mouseover', e => {
+      optionEl.addEventListener('mouseenter', e => {
         if (e.ctrlKey) {
           optionEl.click();
         }
@@ -472,25 +534,18 @@ const initHoverListeners = () => {
 };
 
 const removeTagsFromString = string => string.replace(/<[^>]*>?/gm, '').trim();
-
-const setIsReady = () => {
-  for (const component of components) {
-    const questionDiv = deepHtmlSearch(document, `.${CSS.escape(component._id)}`);
-
-    if (questionDiv)
-      return true;
-  }
-
-  return false;
-};
+const areSetsEqual = (a, b) => a.size === b.size && [...a].every(v => b.has(v));
 
 const main = async () => {
   questions = [];
-  await setQuestionSections();
+  const isAtLeaseOneSet = await setQuestionSections();
+
+  if (!isAtLeaseOneSet)
+    return;
+
   setQuestionElements();
   initClickListeners();
   initHoverListeners();
-  enableTextSelectionRecursive();
 };
 
 const suspendMain = () => {
@@ -498,34 +553,25 @@ const suspendMain = () => {
 
   isSuspendRunning = true;
 
-  const checking = async () => {
-    if (setIsReady()) {
-      clearInterval(interval);
-      main().finally(() => {
-        isSuspendRunning = false;
-      });
-    }
-  };
-
-  const interval = setInterval(checking, 1000);
+  main().finally(() => {
+    isSuspendRunning = false;
+  });
 };
 
 if (window) {
-  setInterval(() => {
+  setInterval(async () => {
     if (isSuspendRunning || components.length === 0)
       return;
 
-    let visibleContainers = 0;
-    for (const component of components) {
-      if (deepHtmlSearch(document, `.${CSS.escape(component._id)}`)) {
-        visibleContainers++;
-      }
-    }
+    let visibleContainers = await findVisibleFromComponents(document, components);
+    const processedCount = new Set(questions.map(q => q.id));
 
-    const processedCount = questions.length;
-
-    if (visibleContainers !== processedCount) {
+    if (!areSetsEqual(visibleContainers, processedCount)) {
       suspendMain();
     }
-  }, 1000);
+  }, 500);
+
+  setInterval(() => {
+    enableTextSelectionRecursive();
+  }, 2000);
 }
