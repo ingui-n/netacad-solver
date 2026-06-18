@@ -8,7 +8,7 @@ Browser extension allowing you to pass all the NetAcad quizzes
 
 <img alt="My generous offer" width="300" src="assets/screenshots/my-offer.jpg"/>
 
-## ⚠️ It's currently unknown if the extension work on final exams ⚠️
+## ⚠️ It's currently unknown if the extension works on final exams ⚠️
 
 > [!IMPORTANT]
 > Thank you so much to everyone who sent me the final exam exports. I've been working on getting the autofill feature

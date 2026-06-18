@@ -119,7 +119,7 @@ export const findVisibleQuestionPartsFromComponents = async (rootDocument, compo
   const pendingTexts = new Map();
 
   for (const comp of componentsArray) {
-    if (!comp._id || !comp.body)
+    if (!comp._id || (!comp.body || comp._items[0]?.text))
       continue;
 
     results[comp._id] = {questionDiv: null, questionElement: null};
@@ -134,6 +134,22 @@ export const findVisibleQuestionPartsFromComponents = async (rootDocument, compo
   }
 
   await deepHtmlBatchSearchInternalAsync(rootDocument, pendingClasses, pendingTexts, results);
+  return results;
+};
+
+export const findElementsByIdClassAsync = async (rootDocument, componentsArray) => {
+  const results = {};
+  const pendingClasses = new Set();
+  const emptyPendingTexts = new Map();
+
+  for (const comp of componentsArray) {
+    if (!comp._id) continue;
+
+    results[comp._id] = {questionDiv: null, questionElement: null};
+    pendingClasses.add(comp._id);
+  }
+
+  await deepHtmlBatchSearchInternalAsync(rootDocument, pendingClasses, emptyPendingTexts, results);
   return results;
 };
 

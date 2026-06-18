@@ -3,8 +3,8 @@ import {
   deepHtmlSearch,
   deepHtmlFindByTextContent,
   enableTextSelectionRecursive,
-  deepHtmlFindByTextContentPart, findVisibleFromComponents, findVisibleQuestionPartsFromComponents,
-  disableAnimationsDeep
+  deepHtmlFindByTextContentPart, findVisibleFromComponents,
+  disableAnimationsDeep, findElementsByIdClassAsync
 } from "./domHelper";
 
 let isSuspendRunning = false;
@@ -23,6 +23,9 @@ const processedTableRows = new WeakSet();
 const processedOpenTextButtons = new WeakSet();
 const processedTableOptions = new WeakSet();
 const processedFillBlankOptions = new WeakSet();
+const processedAccordionQuestions = new WeakSet();
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 browser.runtime.onMessage.addListener(async (request) => {
   if (request?.componentsUrl && typeof request.componentsUrl === 'string' && !componentUrls.includes(request.componentsUrl)) {
@@ -50,7 +53,6 @@ const setComponents = async url => {
     let json = await res.json();
     json = json
       .filter(component => component._items)
-      .filter(component => component.body)
       .filter(component => !components.map(c => c._id).includes(component._id))
       .map(component => {
         component.body = getTextContentOfText(component.body);
@@ -81,7 +83,7 @@ const setFinalExamComponentsFromStorage = async () => {
 const setQuestionSections = async () => {
   let isAtLeaseOneSet = false;
 
-  const foundFromComponents = await findVisibleQuestionPartsFromComponents(document, components);
+  const foundFromComponents = await findElementsByIdClassAsync(document, components);
 
   for (const component of components) {
     const data = foundFromComponents[component._id];
@@ -89,11 +91,13 @@ const setQuestionSections = async () => {
     const questionDiv = data?.questionDiv;
     const questionElement = data?.questionElement;
 
-    if (questionElement) {
+    if (questionDiv) {
       isAtLeaseOneSet = true;
       let questionType = 'basic';
 
-      if (component._items[0].text && component._items[0]._options) {
+      if (component._component === 'accordion') {
+        questionType = 'accordion';
+      } else if (component._items[0].text && component._items[0]._options) {
         questionType = 'dropdownSelect';
       } else if (component._items[0].question && component._items[0].answer) {
         questionType = 'match';
@@ -184,6 +188,9 @@ const setQuestionElements = () => {
     } else if (question.questionType === 'tableDropdown') {
       // when there is no description in the table down only mouseover works
       setTableDropdownQuestions(question);
+      question.skip = true;
+    } else if (question.questionType === 'accordion') {
+      setAccordionQuestions(question);
       question.skip = true;
     }
 
@@ -432,6 +439,25 @@ const setTableDropdownQuestions = question => {
       }
     }
   });
+};
+
+const setAccordionQuestions = question => {
+  if (processedAccordionQuestions.has(question.questionDiv))
+    return;
+  processedAccordionQuestions.add(question.questionDiv);
+
+  const buttons = [...question.questionDiv.querySelectorAll('button')];
+
+  for (const button of buttons) {
+    button.addEventListener('mouseenter', async e => {
+      if (!e.ctrlKey)
+        return;
+
+      button.click();
+      await sleep(1);
+      button.click();
+    });
+  }
 };
 
 const initClickListeners = () => {
