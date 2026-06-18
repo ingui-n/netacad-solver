@@ -1,51 +1,62 @@
 import browser from 'webextension-polyfill';
 
-browser.webRequest.onSendHeaders.addListener(async ({url}) => {
-    const handleSendUrl = async () => {
-      for (let i = 0; i < tabs.length; i++) {
-        const tab = tabs[i];
+const isInternalRequest = (details) => {
+  return details.initiator &&
+    (details.initiator.startsWith('chrome-extension://') || details.initiator.startsWith('moz-extension://'));
+};
 
-        try {
-          await browser.tabs.sendMessage(tab.id, {
-            componentsUrl: url
-          });
+const sendMessage = async (message) => {
+  const handleSendUrl = async () => {
+    for (let i = 0; i < tabs.length; i++) {
+      const tab = tabs[i];
 
-          tabs.splice(i, 1);
-          i--;
+      try {
+        await browser.tabs.sendMessage(tab.id, message);
 
-          if (tabs.length === 0) {
-            clearInterval(sendInterval);
-          }
-        } catch (e) {
+        tabs.splice(i, 1);
+        i--;
+
+        if (tabs.length === 0) {
+          clearInterval(sendInterval);
         }
+      } catch (e) {
       }
-    };
+    }
+  };
 
-    let tabs = (await browser.tabs.query({})).filter(t => t.id && t.title);
-    const sendInterval = setInterval(handleSendUrl, 1000);
+  let tabs = (await browser.tabs.query({})).filter(t => t.id && t.title);
+  const sendInterval = setInterval(handleSendUrl, 500);
 
-    setTimeout(() => {
-      clearInterval(sendInterval);
-    }, 30000);
+  setTimeout(() => {
+    clearInterval(sendInterval);
+  }, 50000);
+};
+
+// catches component URLs
+browser.webRequest.onSendHeaders.addListener(async (details) => {
+    if (isInternalRequest(details))
+      return;
+
+    await sendMessage({componentsUrl: details.url});
   },
   {
     urls: ['https://*.netacad.com/*/components.json*']
   }
 );
 
-browser.webRequest.onBeforeSendHeaders.addListener((details) => {
-    return {
-      requestHeaders: details.requestHeaders.map(header => {
-        if (header.name.toLowerCase() === 'cache-control') {
-          return {
-            name: 'Cache-Control',
-            value: 'no-cache, no-store, must-revalidate'
-          };
-        }
-        return header;
-      })
-    };
-  },
-  {urls: ['https://*.netacad.com/*/components.json*']},
-  ["requestHeaders"]
-);
+// get message with final exam url form catcher.js and save it to local storage
+browser.runtime.onMessage.addListener(async (message, sender) => {
+  if (sender.id === browser.runtime.id && message.type === 'netacad-solver-interceptor') {
+    await sendMessage({componentsUrl: message.url});
+
+    const name = `service-${message.serviceId}`;
+
+    const result = await browser.storage.local.get(name);
+    const obj = result[name] || [];
+
+    if (!obj.includes(message.url)) {
+      obj.push(message.url);
+      await browser.storage.local.set({[name]: obj});
+    }
+  }
+});
