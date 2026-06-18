@@ -17,7 +17,7 @@ Browser extension allowing you to pass all the NetAcad quizzes
 > The problem is that final exams are rendered differently than regular quizzes. Since final exams are only accessible at
 > the end of major courses, I have no way of testing or finding out if the extension is working or not.
 > 
-> If you try this new version 0.0.12 on any Cisco final exam, please create an issue here on GitHub and let me know
+> If you try this new version 0.0.13 on any Cisco final exam, please create an issue here on GitHub and let me know
 > whether the extension worked or not.
 > 
 > Thank you very much!

@@ -112,6 +112,7 @@ const setQuestionSections = async () => {
       }
 
       questions.push({
+        body: component.body,
         questionDiv,
         questionElement,
         id: component._id,
@@ -167,6 +168,7 @@ const setQuestionElements = () => {
         return;
       }
 
+      question.questionElement = deepHtmlFindByTextContent(question.questionDiv, question.body);
       question.items = question.items.map(item => ({...item, text: getTextContentOfText(item.text.trim())}));
       question.inputs = findAnswerInputsBasic(question) || [];
     } else if (question.questionType === 'match') {
