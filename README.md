@@ -8,23 +8,19 @@ Browser extension allowing you to pass all the NetAcad quizzes
 
 <img alt="My generous offer" width="300" src="assets/screenshots/my-offer.jpg"/>
 
-## ⚠️ The extension doesn't work on final exams ⚠️ ... I need your help
+## ⚠️ It's currently unknown if the extension work on final exams ⚠️
 
 > [!IMPORTANT]
-> This web extension doesn't work on final exams, and I'd like to change that. The problem is that final exams are
-> rendered differently than regular quizzes. Since final exams are only accessible at the end of major courses, I have no
-> way of testing or finding out why the extension isn't working on them.
->
-> Because of this, I need an export of any final exam so I can test and fix the extension. Since the Netacad structure
-> is
-> wrapped in numerous shadow roots and iframes, simply saving the page using Ctrl + S or "Save as" won't work (it wouldn't
-> save the content inside the iframes, meaning the test wouldn't download at all). Instead, you need to use an extension
-> like [SingleFile](https://chromewebstore.google.com/detail/singlefile/mpiodijhokgodhhofbcjdecpffjipkle) and export it as
-> a ZIP. (Note: This must be configured manually in the SingleFile extension settings - otherwise, it saves everything
-> into one massive HTML file, which is difficult to edit and look through due to its size).
->
-> If anyone manages to export a final exam, please send it to my email at inguin.in@gmail.com, or upload it to a
-> file-sharing service and send me the link. Thank you very much!
+> Thank you so much to everyone who sent me the final exam exports. I've been working on getting the autofill feature
+> to work for final exams, and I think the extension should work on them now.
+> 
+> The problem is that final exams are rendered differently than regular quizzes. Since final exams are only accessible at
+> the end of major courses, I have no way of testing or finding out if the extension is working or not.
+> 
+> If you try this new version 0.0.11 on any Cisco final exam, please create an issue here on GitHub and let me know
+> whether the extension worked or not.
+> 
+> Thank you very much!
 
 ## Installation
 
