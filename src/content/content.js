@@ -26,23 +26,9 @@ const processedFillBlankOptions = new WeakSet();
 
 browser.runtime.onMessage.addListener(async (request) => {
   if (request?.componentsUrl && typeof request.componentsUrl === 'string' && !componentUrls.includes(request.componentsUrl)) {
-    componentUrls.push(request.componentsUrl);
-    await setComponents(request.componentsUrl);
-    suspendMain();
-  }
-
-  if (request?.componentUrls && typeof request.componentUrls === 'object') {
-    let isNew = false;
-
-    for (const componentUrl of request.componentUrls) {
-      if (!componentUrls.includes(componentUrl)) {
-        isNew = true;
-        componentUrls.push(componentUrl);
-        await setComponents(componentUrl);
-      }
-    }
-
-    if (isNew) {
+    if (!componentUrls.includes(request.componentsUrl)) {
+      componentUrls.push(request.componentsUrl);
+      await setComponents(request.componentsUrl);
       suspendMain();
     }
   }
@@ -74,6 +60,21 @@ const setComponents = async url => {
     components.push(...json);
   } catch (e) {
     console.error(e);
+  }
+};
+
+const setFinalExamComponentsFromStorage = async () => {
+  const serviceId = new URL(window.location).searchParams.get('id');
+  const finalUrls = await browser.storage.local.get(`service-${serviceId}`);
+  const urlsArray = finalUrls?.[`service-${serviceId}`];
+
+  if (Array.isArray(urlsArray)) {
+    for (const url of urlsArray) {
+      if (!componentUrls.includes(url)) {
+        componentUrls.push(url);
+        await setComponents(url);
+      }
+    }
   }
 };
 
@@ -537,6 +538,8 @@ const removeTagsFromString = string => string.replace(/<[^>]*>?/gm, '').trim();
 const areSetsEqual = (a, b) => a.size === b.size && [...a].every(v => b.has(v));
 
 const main = async () => {
+  await setFinalExamComponentsFromStorage();
+
   questions = [];
   const isAtLeaseOneSet = await setQuestionSections();
 

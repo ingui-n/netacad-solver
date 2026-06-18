@@ -1,0 +1,5 @@
+minimumReleaseAgeExclude:
+  - '@babel/helper-define-polyfill-provider@1.0.0'
+  - '@babel/plugin-transform-regenerator@8.0.2'
+  - '@babel/preset-env@8.0.2'
+  - babel-plugin-polyfill-corejs3@1.0.0

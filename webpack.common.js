@@ -6,6 +6,8 @@ module.exports = {
   entry: {
     background: path.resolve('src/background/background.js'),
     content: path.resolve('src/content/content.js'),
+    intercept: path.resolve('src/content/intercept.js'),
+    catcher: path.resolve('src/content/catcher.js'),
   },
   module: {
     rules: [

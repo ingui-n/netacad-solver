@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "MeowCad Solver",
   "description": "Extension allowing you to pass even the hardest MeowCad quizzes",
-  "version": "0.0.10",
+  "version": "0.0.11",
   "icons": {
     "16": "icon-16.png",
     "32": "icon-32.png",
@@ -10,23 +10,35 @@
     "128": "icon-128.png"
   },
   "permissions": [
-    "webRequest"
+    "webRequest",
+    "storage"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "https://*.netacad.com/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
-        "content.js"
-      ],
-      "run_at": "document_start"
+      "matches": ["https://*.netacad.com/*"],
+      "js": ["intercept.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": ["https://*.netacad.com/*"],
+      "js": ["catcher.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED",
+      "all_frames": true
+    },
+    {
+      "matches": ["https://*.netacad.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
     }
   ]
 }
